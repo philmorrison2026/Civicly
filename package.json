@@ -1,0 +1,12 @@
+﻿{
+  "name": "civicly",
+  "version": "1.0.0",
+  "description": "Civic representative tracker — know who speaks for you",
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'No build step needed'"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  }
+}

@@ -1,0 +1,190 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Civicly — Know your representatives</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <header class="top-bar">
+    <div class="app-name">civic<span>ly</span></div>
+    <div class="top-actions">
+      <button class="icon-btn" id="notifBtn" aria-label="Notifications">&#9825;</button>
+      <button class="icon-btn" id="profileBtn" aria-label="Profile">&#9711;</button>
+    </div>
+  </header>
+
+  <section class="screen" id="screenZip">
+    <div class="screen-inner">
+      <div class="hero-label">Know your representatives</div>
+      <h1 class="screen-title">Who speaks for you in Washington?</h1>
+      <p class="screen-sub">Enter your zip code to instantly see your 3 federal representatives and everything they do — voting record, stock trades, donor money, and more. Free.</p>
+      <div class="zip-row">
+        <input type="text" id="zipInput" placeholder="Enter zip code" maxlength="5" inputmode="numeric" />
+        <button class="btn-primary" id="findRepsBtn">Find my reps</button>
+      </div>
+      <div class="privacy-note">&#128274; Zip code only. No account needed.</div>
+    </div>
+  </section>
+
+  <section class="screen hidden" id="screenTopics">
+    <div class="screen-inner">
+      <div class="hero-label">Personalize your feed</div>
+      <h2 class="screen-title">What issues matter most to you?</h2>
+      <p class="screen-sub">Pick up to 3 topics. We'll surface relevant votes, statements, and activity first.</p>
+      <div class="counter" id="topicCounter">Select up to <strong>3 topics</strong></div>
+      <div class="topic-grid" id="topicGrid">
+        <div class="topic-chip" data-topic="Healthcare">&#10084; Healthcare</div>
+        <div class="topic-chip" data-topic="Economy">&#9733; Economy</div>
+        <div class="topic-chip" data-topic="Education">&#128218; Education</div>
+        <div class="topic-chip" data-topic="Climate">&#127807; Climate</div>
+        <div class="topic-chip" data-topic="Housing">&#127968; Housing</div>
+        <div class="topic-chip" data-topic="Immigration">&#127758; Immigration</div>
+        <div class="topic-chip" data-topic="Defense">&#128737; Defense</div>
+        <div class="topic-chip" data-topic="Civil rights">&#9878; Civil rights</div>
+        <div class="topic-chip" data-topic="Taxes">&#128203; Taxes</div>
+        <div class="topic-chip" data-topic="Tech &amp; privacy">&#128187; Tech &amp; privacy</div>
+        <div class="topic-chip" data-topic="Guns">&#128690; Guns</div>
+        <div class="topic-chip" data-topic="Drug policy">&#128138; Drug policy</div>
+      </div>
+      <button class="btn-full" id="topicContinueBtn" disabled>Continue</button>
+      <p class="upgrade-note">Want more than 3? <a href="#" class="upgrade-link">Upgrade to Premium</a></p>
+    </div>
+  </section>
+
+  <section class="screen hidden" id="screenDash">
+    <div class="rep-tabs" id="repTabs"></div>
+    <div class="rep-hero" id="repHero"></div>
+    <div class="stat-row" id="statRow"></div>
+    <div class="section-head">
+      <span class="section-title">Recent activity</span>
+      <span class="see-all">See all &rsaquo;</span>
+    </div>
+    <div class="feed" id="activityFeed"></div>
+    <div class="section-head" style="margin-top:20px">
+      <span class="section-title">Say vs. do</span>
+      <span class="see-all" id="sayVsDoAll">See all &rsaquo;</span>
+    </div>
+    <div id="sayVsDoFeed" style="padding:0 16px"></div>
+    <nav class="nav-bar">
+      <div class="nav-item active" data-screen="screenDash">&#127968;<br>Home</div>
+      <div class="nav-item" data-screen="screenVotes">&#128200;<br>Votes</div>
+      <div class="nav-item" data-screen="screenSVD">&#9888;<br>Say vs. do</div>
+      <div class="nav-item" data-screen="screenMoney">&#128176;<br>Money</div>
+      <div class="nav-item" data-screen="screenLearn">&#128218;<br>Learn</div>
+    </nav>
+  </section>
+
+  <section class="screen hidden" id="screenSVD">
+    <div class="page-header">
+      <button class="back-btn" data-back="screenDash">&larr;</button>
+      <h2 class="page-title">Say vs. do</h2>
+    </div>
+    <p class="page-sub-sm">Public statements alongside public actions. No editorializing — you decide what it means.</p>
+    <div class="filter-row">
+      <div class="filter-chip on">All</div>
+      <div class="filter-chip">Stock vs. vote</div>
+      <div class="filter-chip">Donor vs. vote</div>
+      <div class="filter-chip">Campaign promise</div>
+    </div>
+    <div id="svdCards" style="padding:0 4px"></div>
+    <nav class="nav-bar">
+      <div class="nav-item" data-screen="screenDash">&#127968;<br>Home</div>
+      <div class="nav-item" data-screen="screenVotes">&#128200;<br>Votes</div>
+      <div class="nav-item active" data-screen="screenSVD">&#9888;<br>Say vs. do</div>
+      <div class="nav-item" data-screen="screenMoney">&#128176;<br>Money</div>
+      <div class="nav-item" data-screen="screenLearn">&#128218;<br>Learn</div>
+    </nav>
+  </section>
+
+  <section class="screen hidden" id="screenPremium">
+    <div class="page-header">
+      <button class="back-btn" data-back="screenDash">&larr;</button>
+      <h2 class="page-title">Your representatives</h2>
+    </div>
+    <p class="page-sub-sm">Everyone elected to make decisions that affect your life.</p>
+    <div class="tier-label">Federal — free</div>
+    <div id="federalRepList"></div>
+    <div class="locked-section">
+      <div class="blurred-preview" id="lockedPreview"></div>
+      <div class="lock-overlay">
+        <div class="lock-card">
+          <div class="lock-icon">&#128274;</div>
+          <div class="lock-title">You have more representatives</div>
+          <div class="lock-sub">State legislators, governor, city council, school board, and county commissioners all make decisions that directly affect your daily life.</div>
+          <div class="lock-count">10+</div>
+          <div class="lock-count-label">more representatives in your area</div>
+          <button class="btn-primary" style="width:100%;margin-bottom:8px">Unlock full network — .99/mo</button>
+          <div class="lock-fine">Cancel anytime &middot; Same full dashboard for every rep</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="screen hidden" id="screenVotes">
+    <div class="page-header">
+      <button class="back-btn" data-back="screenDash">&larr;</button>
+      <h2 class="page-title">Voting record</h2>
+    </div>
+    <p class="page-sub-sm">Every recorded vote by your representatives. Plain-English summaries on every bill.</p>
+    <div id="votesContent" style="margin-top:8px"></div>
+    <nav class="nav-bar">
+      <div class="nav-item" data-screen="screenDash">&#127968;<br>Home</div>
+      <div class="nav-item active" data-screen="screenVotes">&#128200;<br>Votes</div>
+      <div class="nav-item" data-screen="screenSVD">&#9888;<br>Say vs. do</div>
+      <div class="nav-item" data-screen="screenMoney">&#128176;<br>Money</div>
+      <div class="nav-item" data-screen="screenLearn">&#128218;<br>Learn</div>
+    </nav>
+  </section>
+
+  <section class="screen hidden" id="screenMoney">
+    <div class="page-header">
+      <button class="back-btn" data-back="screenDash">&larr;</button>
+      <h2 class="page-title">Money map</h2>
+    </div>
+    <p class="page-sub-sm">Where campaign contributions and lobbying money comes from — and which industries are spending.</p>
+    <div id="moneyContent" style="margin-top:8px"></div>
+    <nav class="nav-bar">
+      <div class="nav-item" data-screen="screenDash">&#127968;<br>Home</div>
+      <div class="nav-item" data-screen="screenVotes">&#128200;<br>Votes</div>
+      <div class="nav-item" data-screen="screenSVD">&#9888;<br>Say vs. do</div>
+      <div class="nav-item active" data-screen="screenMoney">&#128176;<br>Money</div>
+      <div class="nav-item" data-screen="screenLearn">&#128218;<br>Learn</div>
+    </nav>
+  </section>
+
+  <section class="screen hidden" id="screenLearn">
+    <div class="page-header">
+      <button class="back-btn" data-back="screenDash">&larr;</button>
+      <h2 class="page-title">How government works</h2>
+    </div>
+    <p class="page-sub-sm">Simple, nonpartisan explainers for anyone who wants to be a more informed voter.</p>
+    <div id="learnContent" style="margin-top:8px"></div>
+    <nav class="nav-bar">
+      <div class="nav-item" data-screen="screenDash">&#127968;<br>Home</div>
+      <div class="nav-item" data-screen="screenVotes">&#128200;<br>Votes</div>
+      <div class="nav-item" data-screen="screenSVD">&#9888;<br>Say vs. do</div>
+      <div class="nav-item" data-screen="screenMoney">&#128176;<br>Money</div>
+      <div class="nav-item active" data-screen="screenLearn">&#128218;<br>Learn</div>
+    </nav>
+  </section>
+
+  <div class="modal-backdrop hidden" id="explainModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modalTitle">Plain-English explanation</span>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <div class="loading-dots"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
