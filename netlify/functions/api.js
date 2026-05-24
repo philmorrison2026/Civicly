@@ -330,9 +330,9 @@ async function handleMoney(params) {
   const allCycleTotals = (totalsData?.results || []).sort((a, b) => (b.cycle || 0) - (a.cycle || 0));
   const bestCycle = allCycleTotals.find(t => (t.receipts || 0) > 50000) || allCycleTotals[0] || null;
 
-  // Pick the cycle with the most named employer entries; donors without an employer are excluded
+  // FEC field is `employer` (not `employer_name`). Filter out blank entries.
   const namedEmployers = (results) =>
-    (results?.results || []).filter(e => (e.employer_name || '').trim().length > 0);
+    (results?.results || []).filter(e => (e.employer || '').trim().length > 0);
   const empCandidates = [emp2024, emp2022, emp2026].map(namedEmployers);
   const employers = empCandidates.reduce((best, cur) => cur.length > best.length ? cur : best, []);
 
@@ -351,11 +351,10 @@ async function handleMoney(params) {
       pacContributions: bestCycle.other_political_committee_contributions || 0,
     } : null,
     topEmployers: employers.slice(0, 8).map(e => ({
-      employer: e.employer_name,
+      employer: e.employer,
       total: e.total || 0,
       count: e.count || 0,
     })),
-    _rawSample: (emp2022?.results || emp2024?.results || emp2026?.results || []).slice(0, 2),
   });
 }
 
