@@ -319,16 +319,22 @@ async function handleMoney(params) {
     return ok({ found: true, candidateId, name: candidate.name, party: candidate.party, totals: null, topEmployers: [] });
   }
 
-  const [totalsData, emp2024, emp2022] = await Promise.all([
+  const [totalsData, emp2024, emp2022, emp2026] = await Promise.all([
     fFetch(`/committee/${committeeId}/totals/?per_page=10`),
-    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2024&sort=-total&per_page=10`),
-    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2022&sort=-total&per_page=10`),
+    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2024&sort=-total&per_page=25`),
+    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2022&sort=-total&per_page=25`),
+    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2026&sort=-total&per_page=25`),
   ]);
 
   // Sort cycles descending in JS; don't rely on FEC sort param
   const allCycleTotals = (totalsData?.results || []).sort((a, b) => (b.cycle || 0) - (a.cycle || 0));
   const bestCycle = allCycleTotals.find(t => (t.receipts || 0) > 50000) || allCycleTotals[0] || null;
-  const employers = (emp2024?.results?.length ? emp2024 : emp2022)?.results || [];
+
+  // Pick the cycle with the most named employer entries; donors without an employer are excluded
+  const namedEmployers = (results) =>
+    (results?.results || []).filter(e => (e.employer_name || '').trim().length > 0);
+  const empCandidates = [emp2024, emp2022, emp2026].map(namedEmployers);
+  const employers = empCandidates.reduce((best, cur) => cur.length > best.length ? cur : best, []);
 
   return ok({
     found: true,
@@ -345,7 +351,7 @@ async function handleMoney(params) {
       pacContributions: bestCycle.other_political_committee_contributions || 0,
     } : null,
     topEmployers: employers.slice(0, 8).map(e => ({
-      employer: e.employer_name || 'Unknown',
+      employer: e.employer_name,
       total: e.total || 0,
       count: e.count || 0,
     })),

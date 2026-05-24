@@ -492,6 +492,8 @@ function _renderMoneyData(el, data, rep) {
           <div class="money-bar-track"><div class="money-bar-fill" style="width:${Math.round((e.total / maxTotal) * 100)}%"></div></div>
           <div class="money-bar-amt">${esc(fmtMoney(e.total))}</div>
         </div>`).join('')}`;
+  } else {
+    employersHtml = `<div style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">Employer breakdown not available for this cycle.</div>`;
   }
 
   el.innerHTML = `
