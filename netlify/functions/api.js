@@ -66,15 +66,28 @@ function classifyRole(district, office) {
   return 'Representative';
 }
 
-// Congress.gov enrichment for a House member (state + numeric district)
+// Convert Congress.gov "LAST, FIRST" list-endpoint name → "First Last"
+function toDirectOrder(raw) {
+  if (!raw) return null;
+  const parts = raw.split(',').map(s => s.trim());
+  if (parts.length < 2) return raw;
+  const last = parts[0].replace(/\b\w/g, c => c.toUpperCase());
+  const first = parts.slice(1).join(' ').trim().replace(/\b\w/g, c => c.toUpperCase());
+  return first ? `${first} ${last}` : last;
+}
+
+// Congress.gov enrichment for a House member (state + numeric district).
+// Uses district-level lookup so the current holder is always authoritative —
+// WIMR frequently returns members who resigned, retired, or moved chambers.
 async function enrichHouse(state, districtNum) {
   const data = await cFetch(
     `/member/congress/${CURRENT_CONGRESS}/${state}/${districtNum}?currentMember=true&limit=5`
   );
   const m = data?.members?.[0];
   if (!m) return null;
+  // directOrderName only available on detail endpoint; fall back to inverting list-endpoint name
   return {
-    name: m.directOrderName || m.invertedOrderName || null,
+    name: m.directOrderName || m.invertedOrderName || toDirectOrder(m.name) || null,
     bioguideId: m.bioguideId || null,
     party: normalizeParty(m.partyName),
     depiction: m.depiction?.imageUrl || null,
@@ -83,44 +96,30 @@ async function enrichHouse(state, districtNum) {
   };
 }
 
-// Congress.gov enrichment for a Senator — tries congress-specific endpoint first,
-// falls back to base /member?stateCode= if that returns empty (common for 119th congress data gaps)
-async function enrichSenator(state, wimrName) {
+// Fetch all current senators for a state from Congress.gov.
+// Returns them in API order (senior first in most cases).
+// Does NOT match by WIMR name — WIMR senator data is frequently years out of date
+// (e.g., returns Feinstein/Harris for CA instead of Schiff/Padilla).
+async function fetchCurrentSenators(state) {
   let members = [];
-
   const primary = await cFetch(
     `/member/congress/${CURRENT_CONGRESS}/${state}?currentMember=true&limit=20`
   );
   members = primary?.members || [];
-
   if (!members.length) {
-    const fallback = await cFetch(
-      `/member?stateCode=${state}&currentMember=true&limit=20`
-    );
+    const fallback = await cFetch(`/member?stateCode=${state}&currentMember=true&limit=20`);
     members = fallback?.members || [];
   }
-
-  if (!members.length) return null;
-
-  const senators = members.filter(m =>
-    (m.terms || []).some(t => t.chamber === 'Senate')
-  );
-
-  const lastName = wimrName.trim().split(' ').pop().toLowerCase();
-  const match = senators.find(m => {
-    const govName = `${m.name || ''} ${m.invertedOrderName || ''}`.toLowerCase();
-    return govName.includes(lastName);
-  });
-
-  if (!match) return null;
-  return {
-    name: match.directOrderName || match.invertedOrderName || null,
-    bioguideId: match.bioguideId || null,
-    party: normalizeParty(match.partyName),
-    depiction: match.depiction?.imageUrl || null,
-    website: match.officialWebsiteUrl || null,
-    termsCount: (match.terms || []).length,
-  };
+  return members
+    .filter(m => (m.terms || []).some(t => t.chamber === 'Senate'))
+    .map(m => ({
+      name: m.directOrderName || m.invertedOrderName || toDirectOrder(m.name) || null,
+      bioguideId: m.bioguideId || null,
+      party: normalizeParty(m.partyName),
+      depiction: m.depiction?.imageUrl || null,
+      website: m.officialWebsiteUrl || null,
+      termsCount: (m.terms || []).length,
+    }));
 }
 
 // ── HANDLER: /api/reps?zip={zip} ─────────────────────────────────────────────
@@ -166,26 +165,35 @@ async function handleReps(params) {
   }));
 
   // Step 3: Congress.gov enrichment — parallel, best-effort
-  await Promise.all(reps.map(async (rep) => {
-    try {
-      let enriched = null;
-      if (rep.role === 'Representative') {
+  // House reps: enrich by district (authoritative current holder)
+  // Senators: always replace with current Congress.gov senators for the state —
+  //   WIMR senator data can be years stale (e.g., shows Harris/Feinstein for CA)
+  const houseReps = reps.filter(r => r.role === 'Representative');
+  const senatorSlots = reps.filter(r => r.role !== 'Representative');
+  const state = reps[0]?.state || '';
+
+  const [, currentSenators] = await Promise.all([
+    Promise.all(houseReps.map(async (rep) => {
+      try {
         const districtNum = parseInt(rep.district, 10);
         if (!isNaN(districtNum)) {
-          enriched = await enrichHouse(rep.state, districtNum);
+          const enriched = await enrichHouse(rep.state, districtNum);
+          if (enriched) {
+            const { name: enrichedName, ...enrichedRest } = enriched;
+            Object.assign(rep, enrichedRest, { enriched: true });
+            if (enrichedName) rep.name = enrichedName;
+          }
         }
-      } else {
-        enriched = await enrichSenator(rep.state, rep.name);
-      }
-      if (enriched) {
-        const { name: enrichedName, ...enrichedRest } = enriched;
-        Object.assign(rep, enrichedRest, { enriched: true });
-        if (enrichedName) rep.name = enrichedName;
-      }
-    } catch {
-      // enrichment is best-effort; WIMR data alone is still usable
-    }
-  }));
+      } catch { /* best-effort */ }
+    })),
+    fetchCurrentSenators(state).catch(() => []),
+  ]);
+
+  // Assign current senators to WIMR slots in order; preserve WIMR phone/office
+  senatorSlots.forEach((rep, idx) => {
+    const senator = currentSenators[idx];
+    if (senator) Object.assign(rep, senator, { enriched: true });
+  });
 
   // Sort: House rep first, then Senior Senator, then Junior Senator
   const roleOrder = { 'Representative': 0, 'Senior Senator': 1, 'Junior Senator': 2, 'Senator': 3 };
