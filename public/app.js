@@ -5,6 +5,7 @@ const state = {
   activeRepIdx: 0,    // which rep tab is selected
   topics: [],         // selected topic strings
   memberCache: {},    // bioguideId → detailed member data from /api/member
+  moneyCache: {},     // bioguideId|name → FEC campaign finance data
 };
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -23,6 +24,12 @@ function partyPillClass(code) {
   if (code === 'D') return 'pill-d';
   if (code === 'R') return 'pill-r';
   return 'pill-tag';
+}
+
+function fmtMoney(n) {
+  if (n >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return '$' + Math.round(n / 1000) + 'K';
+  return '$' + Math.round(n).toLocaleString('en-US');
 }
 
 function formatDate(dateStr) {
@@ -430,14 +437,69 @@ function renderVotesScreen() {
 
 // ── MONEY SCREEN ──────────────────────────────────────────────────────────────
 function renderMoneyScreen() {
+  const rep = state.reps[state.activeRepIdx];
   const el = document.getElementById('moneyContent');
+  if (!rep) return;
+
+  const cacheKey = rep.bioguideId || rep.name;
+  if (state.moneyCache[cacheKey]) {
+    _renderMoneyData(el, state.moneyCache[cacheKey], rep);
+    return;
+  }
+
+  el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading campaign finance data…</div>';
+
+  const office = rep.role === 'Representative' ? 'H' : 'S';
+  const qs = new URLSearchParams({ name: rep.name, state: rep.state, office });
+  if (office === 'H' && rep.district) qs.set('district', rep.district);
+
+  apiFetch(`money?${qs}`)
+    .then(data => {
+      state.moneyCache[cacheKey] = data;
+      _renderMoneyData(el, data, rep);
+    })
+    .catch(e => {
+      el.innerHTML = `<div style="padding:16px;font-size:13px;color:var(--red-text);">${esc(e.message)}</div>`;
+    });
+}
+
+function _renderMoneyData(el, data, rep) {
+  if (!data.found || !data.totals) {
+    el.innerHTML = `<div class="money-card" style="margin:0 16px;">
+      <div style="font-size:13px;color:var(--text-muted);">No FEC campaign finance record found for ${esc(rep.name)}.</div>
+    </div>`;
+    return;
+  }
+
+  const { totals, topEmployers } = data;
+
+  const statsHtml = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px;">
+      <div class="stat"><div class="stat-val" style="font-size:16px;">${esc(fmtMoney(totals.receipts))}</div><div class="stat-label">Total raised</div></div>
+      <div class="stat"><div class="stat-val" style="font-size:16px;">${esc(fmtMoney(totals.disbursements))}</div><div class="stat-label">Total spent</div></div>
+      <div class="stat"><div class="stat-val" style="font-size:16px;">${esc(fmtMoney(totals.individualContributions))}</div><div class="stat-label">From individuals</div></div>
+      <div class="stat"><div class="stat-val" style="font-size:16px;">${esc(fmtMoney(totals.pacContributions))}</div><div class="stat-label">From PACs</div></div>
+    </div>`;
+
+  let employersHtml = '';
+  if (topEmployers.length) {
+    const maxTotal = topEmployers[0].total || 1;
+    employersHtml = `
+      <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-hint);margin-bottom:10px;">Top donor employers</div>
+      ${topEmployers.map(e => `
+        <div class="money-bar-row">
+          <div class="money-bar-label">${esc(e.employer)}</div>
+          <div class="money-bar-track"><div class="money-bar-fill" style="width:${Math.round((e.total / maxTotal) * 100)}%"></div></div>
+          <div class="money-bar-amt">${esc(fmtMoney(e.total))}</div>
+        </div>`).join('')}`;
+  }
+
   el.innerHTML = `
     <div class="money-card" style="margin:0 16px;">
-      <div style="font-size:13px;font-weight:500;margin-bottom:12px;">Campaign funding sources</div>
-      <div style="font-size:12px;color:var(--text-hint);font-style:italic;line-height:1.6;">
-        Campaign finance data from FEC and OpenSecrets will be displayed here.
-        This feature requires an OpenSecrets API integration — coming soon.
-      </div>
+      <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-hint);margin-bottom:10px;">${esc(String(totals.cycle))} Election Cycle</div>
+      ${statsHtml}
+      ${employersHtml}
+      <div style="font-size:10px;color:var(--text-hint);margin-top:12px;">Source: FEC · Federal Election Commission</div>
     </div>`;
 }
 

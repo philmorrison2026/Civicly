@@ -30,6 +30,20 @@ async function cFetch(path) {
   }
 }
 
+// FEC fetch — returns parsed JSON or null on any failure
+async function fFetch(path) {
+  if (!process.env.FEC_API_KEY) return null;
+  const sep = path.includes('?') ? '&' : '?';
+  const url = `https://api.open.fec.gov/v1${path}${sep}api_key=${process.env.FEC_API_KEY}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 function normalizeParty(raw) {
   if (!raw) return null;
   const c = raw.charAt(0).toUpperCase();
@@ -265,6 +279,65 @@ async function handleExplain(rawBody) {
   return ok({ explanation });
 }
 
+// ── HANDLER: /api/money?name={name}&state={state}&office={H|S}&district={d} ──
+async function handleMoney(params) {
+  if (!process.env.FEC_API_KEY) {
+    return fail(503, 'Campaign finance service is not configured (FEC_API_KEY missing).');
+  }
+
+  const name = (params.name || '').trim();
+  const state = (params.state || '').trim().toUpperCase();
+  const office = (params.office || '').trim().toUpperCase();
+  const district = (params.district || '').trim();
+
+  if (!name || !state || !office) {
+    return fail(400, 'name, state, and office are required.');
+  }
+
+  const lastName = name.split(' ').pop();
+  let searchPath = `/candidates/search/?q=${encodeURIComponent(lastName)}&state=${state}&office=${office}&sort=-receipts&per_page=10&has_raised_funds=true`;
+  if (office === 'H' && district) {
+    searchPath += `&district=${String(parseInt(district, 10) || 0).padStart(2, '0')}`;
+  }
+
+  const searchData = await fFetch(searchPath);
+  const candidates = searchData?.results || [];
+  if (!candidates.length) return ok({ found: false, name, state, office });
+
+  const candidate = candidates[0];
+  const candidateId = candidate.candidate_id;
+
+  const [totalsData, emp2024, emp2022] = await Promise.all([
+    fFetch(`/candidates/${candidateId}/totals/?sort=-cycle&per_page=10`),
+    fFetch(`/schedules/schedule_a/by_employer/?candidate_id=${candidateId}&cycle=2024&sort=-total&per_page=10`),
+    fFetch(`/schedules/schedule_a/by_employer/?candidate_id=${candidateId}&cycle=2022&sort=-total&per_page=10`),
+  ]);
+
+  const allCycleTotals = totalsData?.results || [];
+  const bestCycle = allCycleTotals.find(t => (t.receipts || 0) > 50000) || allCycleTotals[0] || null;
+  const employers = (emp2024?.results?.length ? emp2024 : emp2022)?.results || [];
+
+  return ok({
+    found: true,
+    candidateId,
+    name: candidate.name,
+    party: candidate.party,
+    totals: bestCycle ? {
+      cycle: bestCycle.cycle,
+      receipts: bestCycle.receipts || 0,
+      disbursements: bestCycle.disbursements || 0,
+      cashOnHand: bestCycle.cash_on_hand_end_period || 0,
+      individualContributions: bestCycle.individual_itemized_contributions || bestCycle.individual_contributions || 0,
+      pacContributions: bestCycle.other_political_committee_contributions || 0,
+    } : null,
+    topEmployers: employers.slice(0, 8).map(e => ({
+      employer: e.employer_name || 'Unknown',
+      total: e.total || 0,
+      count: e.count || 0,
+    })),
+  });
+}
+
 // ── MAIN HANDLER ──────────────────────────────────────────────────────────────
 exports.handler = async function (event) {
   if (event.httpMethod === 'OPTIONS') {
@@ -284,6 +357,7 @@ exports.handler = async function (event) {
   try {
     if (path === 'reps') return await handleReps(params);
     if (path === 'member') return await handleMember(params);
+    if (path === 'money') return await handleMoney(params);
     if (path === 'explain' && event.httpMethod === 'POST') return await handleExplain(event.body);
     return fail(404, `Unknown endpoint: ${path}`);
   } catch (e) {
