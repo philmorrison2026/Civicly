@@ -39,14 +39,16 @@ function normalizeParty(raw) {
   return raw;
 }
 
-// Determine role from the WIMR "district" field
-// Senators: "Senior Senator" / "Junior Senator"; House: numeric string
-function classifyRole(district) {
-  if (!district) return 'Representative';
-  const d = district.toString().toLowerCase();
+// Determine role from WIMR district + office fields.
+// WIMR sometimes returns "Senior Senator"/"Junior Senator" in district,
+// but often just leaves district empty for senators — use office as fallback.
+function classifyRole(district, office) {
+  const d = (district || '').toString().toLowerCase();
+  const o = (office || '').toString().toLowerCase();
   if (d.includes('senior senator')) return 'Senior Senator';
   if (d.includes('junior senator')) return 'Junior Senator';
   if (d.includes('senator')) return 'Senator';
+  if (o.includes('senate')) return 'Senator';
   return 'Representative';
 }
 
@@ -128,7 +130,7 @@ async function handleReps(params) {
     phone: r.phone || '',
     office: r.office || '',
     website: r.link || r.website || '',
-    role: classifyRole(r.district),
+    role: classifyRole(r.district, r.office),
     // Filled by Congress.gov enrichment below
     bioguideId: null,
     party: null,
