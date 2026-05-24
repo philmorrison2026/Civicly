@@ -307,19 +307,33 @@ async function handleMoney(params) {
   const candidate = candidates[0];
   const candidateId = candidate.candidate_id;
 
+  // /schedules/schedule_a/by_employer/ requires committee_id — candidate_id is silently ignored.
+  // Try principal_committees from the search result first; fall back to a dedicated lookup.
+  let committeeId = candidate.principal_committees?.[0]?.committee_id || null;
+  if (!committeeId) {
+    const cData = await fFetch(`/candidate/${candidateId}/committees/?designation=P&per_page=5`);
+    committeeId = cData?.results?.[0]?.committee_id || null;
+  }
+
+  if (!committeeId) {
+    return ok({ found: true, candidateId, name: candidate.name, party: candidate.party, totals: null, topEmployers: [] });
+  }
+
   const [totalsData, emp2024, emp2022] = await Promise.all([
-    fFetch(`/candidates/${candidateId}/totals/?sort=-cycle&per_page=10`),
-    fFetch(`/schedules/schedule_a/by_employer/?candidate_id=${candidateId}&cycle=2024&sort=-total&per_page=10`),
-    fFetch(`/schedules/schedule_a/by_employer/?candidate_id=${candidateId}&cycle=2022&sort=-total&per_page=10`),
+    fFetch(`/committee/${committeeId}/totals/?per_page=10`),
+    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2024&sort=-total&per_page=10`),
+    fFetch(`/schedules/schedule_a/by_employer/?committee_id=${committeeId}&cycle=2022&sort=-total&per_page=10`),
   ]);
 
-  const allCycleTotals = totalsData?.results || [];
+  // Sort cycles descending in JS; don't rely on FEC sort param
+  const allCycleTotals = (totalsData?.results || []).sort((a, b) => (b.cycle || 0) - (a.cycle || 0));
   const bestCycle = allCycleTotals.find(t => (t.receipts || 0) > 50000) || allCycleTotals[0] || null;
   const employers = (emp2024?.results?.length ? emp2024 : emp2022)?.results || [];
 
   return ok({
     found: true,
     candidateId,
+    committeeId,
     name: candidate.name,
     party: candidate.party,
     totals: bestCycle ? {
