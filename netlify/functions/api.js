@@ -355,6 +355,7 @@ async function handleMoney(params) {
       total: e.total || 0,
       count: e.count || 0,
     })),
+    _rawSample: (emp2022?.results || emp2024?.results || emp2026?.results || []).slice(0, 2),
   });
 }
 
