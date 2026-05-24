@@ -330,9 +330,13 @@ async function handleMoney(params) {
   const allCycleTotals = (totalsData?.results || []).sort((a, b) => (b.cycle || 0) - (a.cycle || 0));
   const bestCycle = allCycleTotals.find(t => (t.receipts || 0) > 50000) || allCycleTotals[0] || null;
 
-  // FEC field is `employer` (not `employer_name`). Filter out blank entries.
+  // FEC field is `employer` (not `employer_name`). Filter blanks and FEC noise strings.
+  const FEC_NOISE = new Set(['NULL', 'N/A', 'NA', 'NONE', 'NOT EMPLOYED', 'UNEMPLOYED', 'NO EMPLOYER']);
   const namedEmployers = (results) =>
-    (results?.results || []).filter(e => (e.employer || '').trim().length > 0);
+    (results?.results || []).filter(e => {
+      const v = (e.employer || '').trim().toUpperCase();
+      return v.length > 0 && !FEC_NOISE.has(v);
+    });
   const empCandidates = [emp2024, emp2022, emp2026].map(namedEmployers);
   const employers = empCandidates.reduce((best, cur) => cur.length > best.length ? cur : best, []);
 
