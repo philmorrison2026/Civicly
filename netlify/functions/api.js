@@ -60,6 +60,7 @@ async function enrichHouse(state, districtNum) {
   const m = data?.members?.[0];
   if (!m) return null;
   return {
+    name: m.directOrderName || m.invertedOrderName || null,
     bioguideId: m.bioguideId || null,
     party: normalizeParty(m.partyName),
     depiction: m.depiction?.imageUrl || null,
@@ -68,13 +69,23 @@ async function enrichHouse(state, districtNum) {
   };
 }
 
-// Congress.gov enrichment for a Senator — fetches all state members for this congress,
-// filters to Senate-chamber members, matches by last name from the WIMR name string
+// Congress.gov enrichment for a Senator — tries congress-specific endpoint first,
+// falls back to base /member?stateCode= if that returns empty (common for 119th congress data gaps)
 async function enrichSenator(state, wimrName) {
-  const data = await cFetch(
+  let members = [];
+
+  const primary = await cFetch(
     `/member/congress/${CURRENT_CONGRESS}/${state}?currentMember=true&limit=20`
   );
-  const members = data?.members || [];
+  members = primary?.members || [];
+
+  if (!members.length) {
+    const fallback = await cFetch(
+      `/member?stateCode=${state}&currentMember=true&limit=20`
+    );
+    members = fallback?.members || [];
+  }
+
   if (!members.length) return null;
 
   const senators = members.filter(m =>
@@ -89,6 +100,7 @@ async function enrichSenator(state, wimrName) {
 
   if (!match) return null;
   return {
+    name: match.directOrderName || match.invertedOrderName || null,
     bioguideId: match.bioguideId || null,
     party: normalizeParty(match.partyName),
     depiction: match.depiction?.imageUrl || null,
@@ -151,7 +163,11 @@ async function handleReps(params) {
       } else {
         enriched = await enrichSenator(rep.state, rep.name);
       }
-      if (enriched) Object.assign(rep, enriched, { enriched: true });
+      if (enriched) {
+        const { name: enrichedName, ...enrichedRest } = enriched;
+        Object.assign(rep, enrichedRest, { enriched: true });
+        if (enrichedName) rep.name = enrichedName;
+      }
     } catch {
       // enrichment is best-effort; WIMR data alone is still usable
     }
