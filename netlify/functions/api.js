@@ -97,21 +97,28 @@ async function enrichHouse(state, districtNum) {
 }
 
 // Fetch all current senators for a state from Congress.gov.
-// Returns them in API order (senior first in most cases).
-// Does NOT match by WIMR name — WIMR senator data is frequently years out of date
-// (e.g., returns Feinstein/Harris for CA instead of Schiff/Padilla).
+// Queries both endpoints in parallel and deduplicates, since the congress-specific
+// endpoint sometimes returns empty and the base endpoint has inconsistent term structures.
 async function fetchCurrentSenators(state) {
-  let members = [];
-  const primary = await cFetch(
-    `/member/congress/${CURRENT_CONGRESS}/${state}?currentMember=true&limit=20`
-  );
-  members = primary?.members || [];
-  if (!members.length) {
-    const fallback = await cFetch(`/member?stateCode=${state}&currentMember=true&limit=20`);
-    members = fallback?.members || [];
-  }
+  const [primary, fallback] = await Promise.all([
+    cFetch(`/member/congress/${CURRENT_CONGRESS}/${state}?currentMember=true&limit=20`),
+    cFetch(`/member?stateCode=${state}&currentMember=true&limit=20`),
+  ]);
+
+  // Merge and deduplicate by bioguideId
+  const all = [...(primary?.members || []), ...(fallback?.members || [])];
+  const seen = new Set();
+  const members = all.filter(m => {
+    if (!m.bioguideId || seen.has(m.bioguideId)) return false;
+    seen.add(m.bioguideId);
+    return true;
+  });
+
   return members
-    .filter(m => (m.terms || []).some(t => t.chamber === 'Senate'))
+    .filter(m => {
+      const terms = Array.isArray(m.terms) ? m.terms : [];
+      return terms.some(t => (t.chamber || '').toLowerCase().includes('senate'));
+    })
     .map(m => ({
       name: m.directOrderName || m.invertedOrderName || toDirectOrder(m.name) || null,
       bioguideId: m.bioguideId || null,
@@ -189,11 +196,24 @@ async function handleReps(params) {
     fetchCurrentSenators(state).catch(() => []),
   ]);
 
-  // Assign current senators to WIMR slots in order; preserve WIMR phone/office
-  senatorSlots.forEach((rep, idx) => {
-    const senator = currentSenators[idx];
-    if (senator) Object.assign(rep, senator, { enriched: true });
-  });
+  // Assign current senators to WIMR slots.
+  // Strategy: name-match first (handles slots where WIMR has the right person),
+  // then fill remaining unmatched slots with unused current senators
+  // (handles slots where WIMR has a retired/departed person like Romney or Harris).
+  const used = new Set();
+  for (const rep of senatorSlots) {
+    const lastName = rep.name.trim().split(' ').pop().toLowerCase();
+    let matchIdx = currentSenators.findIndex((s, i) =>
+      !used.has(i) && (s.name || '').toLowerCase().includes(lastName)
+    );
+    if (matchIdx === -1) {
+      matchIdx = currentSenators.findIndex((_, i) => !used.has(i));
+    }
+    if (matchIdx >= 0) {
+      used.add(matchIdx);
+      Object.assign(rep, currentSenators[matchIdx], { enriched: true });
+    }
+  }
 
   // Sort: House rep first, then Senior Senator, then Junior Senator
   const roleOrder = { 'Representative': 0, 'Senior Senator': 1, 'Junior Senator': 2, 'Senator': 3 };
