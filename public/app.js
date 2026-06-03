@@ -445,22 +445,26 @@ document.querySelectorAll('.back-btn[data-back]').forEach(btn => {
 document.getElementById('sayVsDoAll')?.addEventListener('click', () => showScreen('screenSVD'));
 
 // ── VOTES SCREEN ──────────────────────────────────────────────────────────────
+// Filter state — reset when switching reps
+let _votesFilter = { bioguideId: null, status: 'all', topic: 'all' };
+
 function renderVotesScreen() {
   const rep = state.reps[state.activeRepIdx];
   const cached = rep?.bioguideId ? state.memberCache[rep.bioguideId] : null;
   const el = document.getElementById('votesContent');
   if (!rep) return;
 
-  // If we have real roll-call vote data from Congress.gov, show it
-  const realVotes = rep.bioguideId ? state.votesCache[rep.bioguideId] : null;
-  if (realVotes?.length) {
-    _renderRealVotes(el, realVotes);
-    return;
+  // Reset filters when rep changes
+  if (_votesFilter.bioguideId !== rep.bioguideId) {
+    _votesFilter = { bioguideId: rep.bioguideId, status: 'all', topic: 'all' };
   }
+
+  // Real roll-call vote data takes priority if available
+  const realVotes = rep.bioguideId ? state.votesCache[rep.bioguideId] : null;
+  if (realVotes?.length) { _renderRealVotes(el, realVotes); return; }
 
   if (!cached) {
     el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading bill history…</div>';
-    // Kick off real-votes fetch in background
     if (rep.bioguideId && !state.votesCache[rep.bioguideId]) _fetchVotes(rep.bioguideId);
     return;
   }
@@ -471,49 +475,102 @@ function renderVotesScreen() {
     return;
   }
 
-  // Group bills by status for the summary header
-  const groups = { law: [], passed: [], failed: [], committee: [] };
+  // Count by status for filter labels
+  const counts = { law: 0, passed: 0, failed: 0, committee: 0 };
   bills.forEach(b => {
     const s = billStatus(b.latestAction?.text);
-    if (s === 'law') groups.law.push(b);
-    else if (s.startsWith('passed')) groups.passed.push(b);
-    else if (s === 'failed' || s === 'vetoed') groups.failed.push(b);
-    else groups.committee.push(b);
+    if (s === 'law') counts.law++;
+    else if (s.startsWith('passed')) counts.passed++;
+    else if (s === 'failed' || s === 'vetoed') counts.failed++;
+    else counts.committee++;
   });
 
-  const summaryChips = [
-    groups.law.length ? `<span class="status-law" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.law.length} became law</span>` : '',
-    groups.passed.length ? `<span class="status-passed" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.passed.length} passed a chamber</span>` : '',
-    groups.failed.length ? `<span class="status-failed" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.failed.length} failed</span>` : '',
-    groups.committee.length ? `<span class="status-committee" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.committee.length} in committee</span>` : '',
-  ].filter(Boolean).join('');
+  // Dynamic topic list from actual bill data
+  const topics = [...new Set(bills.map(b => b.policyArea?.name).filter(Boolean))].sort();
+
+  const statusOpts = [
+    { key: 'all', label: `All (${bills.length})`, cls: '' },
+    counts.law     ? { key: 'law',       label: `Became Law (${counts.law})`,       cls: 'status-law' }      : null,
+    counts.passed  ? { key: 'passed',    label: `Passed (${counts.passed})`,         cls: 'status-passed' }   : null,
+    counts.failed  ? { key: 'failed',    label: `Failed (${counts.failed})`,         cls: 'status-failed' }   : null,
+    counts.committee ? { key: 'committee', label: `In Committee (${counts.committee})`, cls: 'status-committee' } : null,
+  ].filter(Boolean);
 
   el.innerHTML = `
-    <div style="padding:0 16px 14px;">
-      <div style="font-size:13px;font-weight:500;margin-bottom:8px;">${bills.length} sponsored bills</div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;">${summaryChips}</div>
-    </div>` +
-    bills.map(bill => {
-      const label = `${billTypeLabel(bill.type)} ${bill.number} — ${bill.title}`;
-      const date = formatDate(bill.introducedDate);
-      const action = bill.latestAction?.text || '';
-      const status = billStatus(action);
-      const url = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
-      const topic = bill.policyArea?.name || '';
-      return `<div class="feed-card" style="margin:0 16px 8px;">
-        <div class="feed-top">
-          <span class="feed-badge ${billStatusClass(status)}">${esc(billStatusLabel(status))}</span>
-          ${topic ? `<span class="feed-badge" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
-          <span class="feed-date">${esc(date)}</span>
-        </div>
-        <div class="feed-title">${esc(label)}</div>
-        ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
-        <div class="feed-action">
-          <button class="explain-btn" data-text="${esc(label)}" data-type="bill">What does this mean?</button>
-          ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
-        </div>
-      </div>`;
-    }).join('');
+    <div style="padding:0 16px 4px;">
+      <div class="filter-section-label">Status</div>
+      <div class="filter-row" id="voteStatusFilter">
+        ${statusOpts.map(o => `<div class="filter-chip${_votesFilter.status === o.key ? ' on' : ''}" data-status="${esc(o.key)}">${esc(o.label)}</div>`).join('')}
+      </div>
+      <div class="filter-section-label" style="margin-top:10px;">Topic</div>
+      <div class="filter-row" id="voteTopicFilter">
+        <div class="filter-chip${_votesFilter.topic === 'all' ? ' on' : ''}" data-topic="all">All topics</div>
+        ${topics.map(t => `<div class="filter-chip${_votesFilter.topic === t ? ' on' : ''}" data-topic="${esc(t)}">${esc(t)}</div>`).join('')}
+      </div>
+    </div>
+    <div id="votesList"></div>`;
+
+  document.getElementById('voteStatusFilter').addEventListener('click', e => {
+    const chip = e.target.closest('[data-status]');
+    if (!chip) return;
+    _votesFilter.status = chip.dataset.status;
+    document.querySelectorAll('#voteStatusFilter .filter-chip').forEach(c =>
+      c.classList.toggle('on', c.dataset.status === _votesFilter.status));
+    _renderVotesList(bills);
+  });
+
+  document.getElementById('voteTopicFilter').addEventListener('click', e => {
+    const chip = e.target.closest('[data-topic]');
+    if (!chip) return;
+    _votesFilter.topic = chip.dataset.topic;
+    document.querySelectorAll('#voteTopicFilter .filter-chip').forEach(c =>
+      c.classList.toggle('on', c.dataset.topic === _votesFilter.topic));
+    _renderVotesList(bills);
+  });
+
+  _renderVotesList(bills);
+}
+
+function _renderVotesList(bills) {
+  const el = document.getElementById('votesList');
+  if (!el) return;
+
+  const filtered = bills.filter(b => {
+    const s = billStatus(b.latestAction?.text);
+    const statusMatch = _votesFilter.status === 'all'
+      || (_votesFilter.status === 'passed' && s.startsWith('passed'))
+      || (_votesFilter.status === 'committee' && s === 'committee')
+      || s === _votesFilter.status;
+    const topicMatch = _votesFilter.topic === 'all' || b.policyArea?.name === _votesFilter.topic;
+    return statusMatch && topicMatch;
+  });
+
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No bills match this filter.</div>';
+    return;
+  }
+
+  el.innerHTML = filtered.map(bill => {
+    const label = `${billTypeLabel(bill.type)} ${bill.number} — ${bill.title}`;
+    const date = formatDate(bill.introducedDate);
+    const action = bill.latestAction?.text || '';
+    const status = billStatus(action);
+    const url = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
+    const topic = bill.policyArea?.name || '';
+    return `<div class="feed-card" style="margin:0 16px 8px;">
+      <div class="feed-top">
+        <span class="feed-badge ${billStatusClass(status)}">${esc(billStatusLabel(status))}</span>
+        ${topic ? `<span class="feed-badge" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
+        <span class="feed-date">${esc(date)}</span>
+      </div>
+      <div class="feed-title">${esc(label)}</div>
+      ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
+      <div class="feed-action">
+        <button class="explain-btn" data-text="${esc(label)}" data-type="bill">What does this mean?</button>
+        ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 
   el.querySelectorAll('.explain-btn').forEach(btn => {
     btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'bill', btn.dataset.text));
