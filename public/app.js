@@ -5,8 +5,9 @@ const state = {
   activeRepIdx: 0,    // which rep tab is selected
   topics: [],         // selected topic strings
   memberCache: {},    // bioguideId → detailed member data from /api/member
-  moneyCache: {},     // bioguideId|name → FEC campaign finance data
-  votesCache: {},     // bioguideId → congressional vote data
+  moneyCache: {},      // bioguideId|name → FEC campaign finance data
+  votesCache: {},      // bioguideId → congressional vote data
+  aiSummaryCache: {},  // bioguideId → {topIssues, legislativeFocus, summary}
 };
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -201,6 +202,7 @@ function renderDashboard() {
   renderRepTabs();
   renderRepHero(state.activeRepIdx);
   renderStatRow(state.activeRepIdx);
+  renderAISummary(state.activeRepIdx);
   renderCommittees(state.activeRepIdx);
   renderActivityFeed(state.activeRepIdx);
   _wirePokeBtn();
@@ -240,27 +242,67 @@ function renderRepHero(idx) {
   const party = cached?.party || rep.party;
   const website = cached?.website || rep.website;
   const depiction = cached?.depiction || rep.depiction;
+  const terms = cached?.terms || [];
+  const phone = cached?.addressInformation?.phoneNumber || null;
+  const birthYear = cached?.birthYear || null;
+
+  const age = birthYear ? (new Date().getFullYear() - birthYear) : null;
+  const sinceYear = terms.length ? Math.min(...terms.map(t => t.startYear).filter(Boolean)) : null;
+  const yearsServed = sinceYear ? (new Date().getFullYear() - sinceYear) : null;
+  const termsCount = terms.length || rep.termsCount || null;
+
+  const chamberWord = rep.role === 'Representative' ? 'HOUSE' : 'SENATE';
+  const partyWord = party === 'D' ? 'DEMOCRAT' : party === 'R' ? 'REPUBLICAN' : party || '';
+  const badgeText = partyWord ? `${chamberWord} · ${partyWord}` : chamberWord;
+  const bannerColor = party === 'D'
+    ? 'linear-gradient(135deg,#1a3a6e 0%,#2558a0 100%)'
+    : party === 'R'
+    ? 'linear-gradient(135deg,#6e1a1a 0%,#a03030 100%)'
+    : 'linear-gradient(135deg,#2a3a4e 0%,#3a5068 100%)';
 
   const avatarHtml = depiction
-    ? `<img class="hero-av" src="${esc(depiction)}" alt="${esc(rep.name)}" style="object-fit:cover;">`
-    : `<div class="hero-av">${esc(initials(rep.name))}</div>`;
+    ? `<img class="hero-av-lg" src="${esc(depiction)}" alt="${esc(rep.name)}">`
+    : `<div class="hero-av-lg hero-av-initials">${esc(initials(rep.name))}</div>`;
 
-  const sinceYear = cached?.terms?.length
-    ? Math.min(...cached.terms.map(t => t.startYear).filter(Boolean))
-    : null;
+  const districtLabel = rep.role === 'Representative' ? `${rep.state}-${rep.district}` : rep.state;
+
+  const tenurePct = yearsServed ? Math.min(100, Math.round((yearsServed / 40) * 100)) : 0;
+  const tenureSection = yearsServed ? `
+    <div style="padding:0 16px 2px;">
+      <div style="font-size:10px;color:rgba(255,255,255,.6);text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;">Tenure · ${yearsServed}y in office</div>
+      <div style="height:5px;background:rgba(255,255,255,.2);border-radius:3px;overflow:hidden;">
+        <div style="height:100%;width:${tenurePct}%;background:rgba(255,255,255,.75);border-radius:3px;"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:rgba(255,255,255,.45);margin-top:3px;"><span>0y</span><span>10y</span><span>20y</span><span>30y</span><span>40y+</span></div>
+    </div>` : '';
+
+  const phoneClean = phone ? phone.replace(/[^\d+]/g, '') : null;
+  const actionBtns = [
+    phoneClean ? `<a href="tel:${esc(phoneClean)}" class="hero-action-btn">📞 Call</a>` : '',
+    website ? `<a href="${esc(website)}" target="_blank" rel="noopener" class="hero-action-btn">🌐 Website</a>` : '',
+    `<button class="hero-action-btn hero-poke-btn" id="pokeRepBtn">👋 Poke</button>`,
+  ].filter(Boolean).join('');
+
+  const statsHtml = [
+    age ? `<div class="hero-stat-item"><span class="hsi-val">${age}</span><span class="hsi-label">Age</span></div>` : '',
+    termsCount ? `<div class="hero-stat-item"><span class="hsi-val">${termsCount}</span><span class="hsi-label">Terms</span></div>` : '',
+    sinceYear ? `<div class="hero-stat-item"><span class="hsi-val">${sinceYear}</span><span class="hsi-label">Since</span></div>` : '',
+  ].filter(Boolean).join('<div class="hero-stat-divider"></div>');
 
   document.getElementById('repHero').innerHTML = `
-    <div class="rep-hero-inner">
-      ${avatarHtml}
-      <div>
-        <div class="hero-name">${esc(rep.name)}</div>
-        <div class="hero-meta">${esc(rep.state)}${rep.role === 'Representative' ? `-${esc(rep.district)}` : ''} · ${esc(rep.role)}</div>
-        ${party ? `<span class="pill ${partyPillClass(party)}">${esc(partyLabel(party))}</span>` : ''}
-        ${sinceYear ? `<span class="pill pill-tag">Since ${sinceYear}</span>` : ''}
-        ${website ? `<a href="${esc(website)}" target="_blank" rel="noopener" style="display:block;font-size:12px;color:var(--blue);margin-top:6px;">Official website ↗</a>` : ''}
-        <button class="poke-btn" id="pokeRepBtn" style="margin-top:10px;">Poke Your Rep 👋</button>
+    <div class="hero-banner" style="background:${bannerColor};">
+      <div class="hero-banner-inner">
+        ${avatarHtml}
+        <div class="hero-banner-text">
+          <div class="hero-chamber-badge">${esc(badgeText)}</div>
+          <div class="hero-name-lg">${esc(rep.name)}</div>
+          <div class="hero-location">${esc(districtLabel)} · ${esc(rep.role)}</div>
+        </div>
       </div>
-    </div>`;
+      ${tenureSection}
+      <div class="hero-action-row">${actionBtns}</div>
+    </div>
+    ${statsHtml ? `<div class="hero-stats-strip">${statsHtml}</div>` : ''}`;
 }
 
 function renderStatRow(idx) {
@@ -369,9 +411,11 @@ async function loadMemberDetail(bioguideId) {
     if (activeRep?.bioguideId === bioguideId) {
       renderRepHero(state.activeRepIdx);
       renderStatRow(state.activeRepIdx);
+      renderAISummary(state.activeRepIdx);
       renderCommittees(state.activeRepIdx);
       renderActivityFeed(state.activeRepIdx);
       _wirePokeBtn();
+      _maybeFetchAISummary(bioguideId, data);
     }
   } catch (e) {
     console.warn('Member detail fetch failed for', bioguideId, e.message);
@@ -783,6 +827,91 @@ document.querySelectorAll('.nav-item[data-screen]').forEach(item => {
     if (screenRenderMap[item.dataset.screen]) screenRenderMap[item.dataset.screen]();
   });
 });
+
+// ── AI SUMMARY ────────────────────────────────────────────────────────────────
+function renderAISummary(idx) {
+  const el = document.getElementById('aiSummarySection');
+  if (!el) return;
+  const rep = state.reps[idx];
+  if (!rep?.bioguideId) { el.innerHTML = ''; return; }
+
+  const cached = state.aiSummaryCache[rep.bioguideId];
+  if (!cached) { el.innerHTML = ''; return; } // fetch triggered separately
+  if (cached._loading) {
+    el.innerHTML = `<div class="ai-summary-card"><div class="ai-summary-header"><span style="font-size:13px;color:var(--text-muted);">Generating AI summary…</span><div class="loading-dots" style="padding:0;"><span></span><span></span><span></span></div></div></div>`;
+    return;
+  }
+  if (cached._failed || !cached.topIssues) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <div class="ai-summary-card">
+      <div class="ai-summary-header">
+        <span style="font-size:15px;">🤖</span>
+        <span class="ai-summary-label">AI Summary</span>
+        <span style="font-size:11px;color:var(--text-hint);margin-left:auto;">Generated by Claude</span>
+      </div>
+      <div class="ai-summary-cols">
+        <div class="ai-summary-col" style="border-right:0.5px solid var(--border);">
+          <div class="ai-col-title">Top Issues</div>
+          <ul class="ai-col-list">${(cached.topIssues || []).map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+        </div>
+        <div class="ai-summary-col">
+          <div class="ai-col-title">Legislative Focus</div>
+          <p class="ai-summary-text">${esc(cached.legislativeFocus || '')}</p>
+        </div>
+      </div>
+      ${cached.summary ? `<div style="padding:12px 14px;border-top:0.5px solid var(--border);">
+        <div class="ai-col-title" style="margin-bottom:6px;">Summary</div>
+        <p class="ai-summary-text">${esc(cached.summary)}</p>
+      </div>` : ''}
+      <div class="ai-summary-footer">Based on sponsored bills, committees, and FEC data · Always verify with official sources</div>
+    </div>`;
+}
+
+function _maybeFetchAISummary(bioguideId, memberData) {
+  if (state.aiSummaryCache[bioguideId]) return;
+  state.aiSummaryCache[bioguideId] = { _loading: true };
+
+  // Build compact context for Claude
+  const bills = memberData.sponsoredLegislation || [];
+  const topicCounts = {};
+  bills.forEach(b => { if (b.policyArea?.name) topicCounts[b.policyArea.name] = (topicCounts[b.policyArea.name] || 0) + 1; });
+  const topTopics = Object.entries(topicCounts).sort((a, b) => b[1] - a[1]).slice(0, 8)
+    .map(([t, n]) => `${t} (${n} bills)`).join(', ');
+
+  const committees = (memberData.committees || []).map(c => c.rank ? `${c.name} (${c.rank})` : c.name).join(', ');
+  const terms = memberData.terms || [];
+  const sinceYear = terms.length ? Math.min(...terms.map(t => t.startYear).filter(Boolean)) : null;
+
+  const context = [
+    `Name: ${memberData.name}`,
+    `Role: ${memberData.party === 'D' ? 'Democrat' : memberData.party === 'R' ? 'Republican' : ''} ${state.reps[state.activeRepIdx]?.role || ''}`,
+    `State: ${memberData.state}${memberData.district ? `, District ${memberData.district}` : ''}`,
+    sinceYear ? `Serving since: ${sinceYear} (${terms.length} terms)` : '',
+    topTopics ? `Top bill topics: ${topTopics}` : '',
+    `Total sponsored: ${bills.length} bills, ${memberData.cosponsoredLegislation?.length || 0} cosponsored`,
+    committees ? `Committee assignments: ${committees}` : '',
+  ].filter(Boolean).join('\n');
+
+  apiPost('explain', { text: context, type: 'aiprofile' })
+    .then(data => {
+      try {
+        const parsed = JSON.parse(data.explanation);
+        state.aiSummaryCache[bioguideId] = parsed;
+      } catch {
+        state.aiSummaryCache[bioguideId] = { _failed: true };
+      }
+      const activeRep = state.reps[state.activeRepIdx];
+      if (activeRep?.bioguideId === bioguideId) renderAISummary(state.activeRepIdx);
+    })
+    .catch(() => {
+      state.aiSummaryCache[bioguideId] = { _failed: true };
+    });
+
+  // Show loading state immediately
+  const activeRep = state.reps[state.activeRepIdx];
+  if (activeRep?.bioguideId === bioguideId) renderAISummary(state.activeRepIdx);
+}
 
 // ── POKE YOUR REP ─────────────────────────────────────────────────────────────
 const POKE_REACTIONS = [

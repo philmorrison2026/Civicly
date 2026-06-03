@@ -315,6 +315,7 @@ async function handleExplain(rawBody) {
     conflict: `You are a nonpartisan civic education tool. Summarize the following sequence of public events in neutral, factual language in 2-3 sentences. Do not draw conclusions — just describe what the public record shows.\n\nEvents: ${text}`,
     term: `Explain this political term in one simple sentence that a first-time voter would understand: ${text}`,
     poke: `You are a civic engagement assistant for an app called Civicly. Write a short, respectful message from a constituent to their representative. The message must be polite, nonpartisan, and specific to the issue and reaction provided. Write in first person as the constituent. Do not mention Civicly. Under 100 words. End with a clear, respectful ask. Do not add a subject line.\n\n${text}\n\nWrite only the message body, starting with the representative's title and last name (e.g. "Senator Lee," or "Representative Maloy,") and ending with "A constituent from [their state or district]."`,
+    aiprofile: `You are a nonpartisan civic profile generator. Based on the following data about a U.S. representative, generate a concise factual profile. Return ONLY valid JSON — no markdown, no explanation, just the JSON object.\n\n${text}\n\nReturn exactly this JSON shape:\n{"topIssues":["up to 5 short phrases"],"legislativeFocus":"2-3 sentences on their legislative work based on bills and committees","summary":"2-3 sentences overall at 8th-grade reading level, nonpartisan"}\n\nRules: No accusations. No partisan framing. Focus only on observable legislative activity. Return only the JSON.`,
   };
 
   const prompt = prompts[type] || prompts.bill;
@@ -330,7 +331,7 @@ async function handleExplain(rawBody) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 300,
+        max_tokens: type === 'aiprofile' ? 600 : 300,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
