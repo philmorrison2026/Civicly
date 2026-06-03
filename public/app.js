@@ -273,7 +273,7 @@ function renderActivityFeed(idx) {
     return;
   }
 
-  feedEl.innerHTML = bills.slice(0, 5).map(bill => {
+  feedEl.innerHTML = bills.slice(0, 6).map(bill => {
     const label = `${billTypeLabel(bill.type)} ${bill.number}`;
     const date = formatDate(bill.introducedDate);
     const action = bill.latestAction?.text || '';
@@ -410,7 +410,7 @@ function renderVotesScreen() {
   }
 
   el.innerHTML = `<div style="padding:0 16px;font-size:12px;color:var(--text-hint);margin-bottom:12px;">
-      Showing sponsored legislation. Full voting record data coming soon.
+      ${bills.length} sponsored bills. Actual floor vote record requires ProPublica API — coming soon.
     </div>` +
     bills.map(bill => {
       const label = `${billTypeLabel(bill.type)} ${bill.number} — ${bill.title}`;

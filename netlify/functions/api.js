@@ -229,8 +229,8 @@ async function handleMember(params) {
 
   const [memberData, sponsored, cosponsored] = await Promise.all([
     cFetch(`/member/${bioguideId}`),
-    cFetch(`/member/${bioguideId}/sponsored-legislation?limit=20`),
-    cFetch(`/member/${bioguideId}/cosponsored-legislation?limit=10`),
+    cFetch(`/member/${bioguideId}/sponsored-legislation?limit=250`),
+    cFetch(`/member/${bioguideId}/cosponsored-legislation?limit=20`),
   ]);
 
   if (!memberData?.member) {
