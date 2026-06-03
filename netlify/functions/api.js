@@ -227,20 +227,30 @@ async function handleMember(params) {
   const bioguideId = (params.bioguideId || '').trim();
   if (!bioguideId) return fail(400, 'bioguideId is required.');
 
-  const [memberData, sponsored, cosponsored] = await Promise.all([
+  const [memberData, sponsored, cosponsored, committeeData] = await Promise.all([
     cFetch(`/member/${bioguideId}`),
     cFetch(`/member/${bioguideId}/sponsored-legislation?limit=250`),
     cFetch(`/member/${bioguideId}/cosponsored-legislation?limit=20`),
+    cFetch(`/member/${bioguideId}/committee-assignments`),
   ]);
 
-  if (!memberData?.member) {
-    return fail(404, 'Member not found.');
-  }
+  if (!memberData?.member) return fail(404, 'Member not found.');
 
   const m = memberData.member;
   const currentParty = m.partyHistory?.[m.partyHistory.length - 1]?.partyAbbreviation
     || m.partyName
     || null;
+
+  // Normalize committee data — Congress.gov may use committeeAssignments or committees key
+  const rawCommittees = committeeData?.committeeAssignments || committeeData?.committees || [];
+  const committees = rawCommittees
+    .map(c => ({
+      name: c.name || c.committee?.name || '',
+      chamber: c.chamber || '',
+      rank: c.rank || c.title || c.rankLabel || null,
+      systemCode: c.systemCode || c.committee?.systemCode || null,
+    }))
+    .filter(c => c.name);
 
   return ok({
     bioguideId,
@@ -253,9 +263,36 @@ async function handleMember(params) {
     birthYear: m.birthYear || null,
     terms: m.terms || [],
     addressInformation: m.addressInformation || null,
+    committees,
     sponsoredLegislation: sponsored?.sponsoredLegislation || [],
     cosponsoredLegislation: cosponsored?.cosponsoredLegislation || [],
   });
+}
+
+// ── HANDLER: /api/votes?bioguideId={id} ──────────────────────────────────────
+async function handleVotes(params) {
+  const bioguideId = (params.bioguideId || '').trim();
+  if (!bioguideId) return fail(400, 'bioguideId is required.');
+
+  // Try Congress.gov member votes endpoint (available in API v3 for some congresses)
+  const data = await cFetch(`/member/${bioguideId}/votes?limit=50`);
+  if (data?.votes?.length) {
+    return ok({
+      source: 'congress',
+      votes: data.votes.map(v => ({
+        date: v.date || v.actionDate || null,
+        question: v.question || null,
+        description: v.description || null,
+        bill: v.bill ? { type: v.bill.type, number: v.bill.number, title: v.bill.title } : null,
+        position: v.memberPosition || v.position || null,
+        result: v.result || null,
+        chamber: v.chamber || null,
+        rollNumber: v.rollNumber || null,
+      })),
+    });
+  }
+
+  return ok({ source: 'none', votes: [] });
 }
 
 // ── HANDLER: POST /api/explain ────────────────────────────────────────────────
@@ -368,6 +405,26 @@ async function handleMoney(params) {
   const empCandidates = [emp2024, emp2022, emp2026].map(namedEmployers);
   const employers = empCandidates.reduce((best, cur) => cur.length > best.length ? cur : best, []);
 
+  // Fetch top individual itemized donors for the best cycle
+  const donorCycle = bestCycle?.cycle || 2024;
+  const donorsData = await fFetch(
+    `/schedules/schedule_a/?committee_id=${committeeId}&two_year_transaction_period=${donorCycle}` +
+    `&entity_type=IND&sort=-contribution_receipt_amount&per_page=20`
+  );
+  const titleCase = s => (s || '').replace(/\b\w+/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+  const topDonors = (donorsData?.results || [])
+    .filter(d => d.contributor_name && (d.contribution_receipt_amount || 0) > 0)
+    .slice(0, 10)
+    .map(d => ({
+      name: titleCase(d.contributor_name),
+      employer: titleCase(d.contributor_employer || ''),
+      occupation: titleCase(d.contributor_occupation || ''),
+      amount: d.contribution_receipt_amount || 0,
+      date: d.contribution_receipt_date || null,
+      city: d.contributor_city || null,
+      state: d.contributor_state || null,
+    }));
+
   return ok({
     found: true,
     candidateId,
@@ -387,6 +444,7 @@ async function handleMoney(params) {
       total: e.total || 0,
       count: e.count || 0,
     })),
+    topDonors,
   });
 }
 
@@ -410,6 +468,7 @@ exports.handler = async function (event) {
     if (path === 'reps') return await handleReps(params);
     if (path === 'member') return await handleMember(params);
     if (path === 'money') return await handleMoney(params);
+    if (path === 'votes') return await handleVotes(params);
     if (path === 'explain' && event.httpMethod === 'POST') return await handleExplain(event.body);
     return fail(404, `Unknown endpoint: ${path}`);
   } catch (e) {

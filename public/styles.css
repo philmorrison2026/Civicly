@@ -172,6 +172,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .money-bar-fill { height: 100%; background: var(--blue); border-radius: 3px; }
 .money-bar-amt { font-size: 11px; color: var(--text-muted); width: 52px; text-align: right; flex-shrink: 0; }
 
+.committee-chip { display:inline-block; font-size:11px; padding:3px 9px; border-radius:20px; background:var(--purple-bg); color:var(--purple-text); font-weight:500; line-height:1.5; }
+
+.status-law { background:var(--green-bg); color:var(--green-text); }
+.status-passed { background:var(--blue-light); color:var(--blue-dark); }
+.status-failed { background:var(--red-bg); color:var(--red-text); }
+.status-committee { background:var(--bg-surface); color:var(--text-muted); }
+
 @media (min-width: 600px) {
   .screen { padding: 32px 32px 100px; }
   .topic-grid { grid-template-columns: 1fr 1fr 1fr; }

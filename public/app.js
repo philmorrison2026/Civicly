@@ -6,6 +6,7 @@ const state = {
   topics: [],         // selected topic strings
   memberCache: {},    // bioguideId → detailed member data from /api/member
   moneyCache: {},     // bioguideId|name → FEC campaign finance data
+  votesCache: {},     // bioguideId → congressional vote data
 };
 
 // ── UTILS ─────────────────────────────────────────────────────────────────────
@@ -30,6 +31,36 @@ function fmtMoney(n) {
   if (n >= 1000000) return '$' + (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return '$' + Math.round(n / 1000) + 'K';
   return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+function billStatus(latestActionText) {
+  const t = (latestActionText || '').toLowerCase();
+  if (t.includes('became public law') || t.includes('signed by president')) return 'law';
+  if (t.includes('passed house') && t.includes('passed senate')) return 'passed-both';
+  if (t.includes('passed house')) return 'passed-house';
+  if (t.includes('passed senate')) return 'passed-senate';
+  if (t.includes('failed') || t.includes('rejected') || t.includes('defeated')) return 'failed';
+  if (t.includes('vetoed')) return 'vetoed';
+  return 'committee';
+}
+
+function billStatusLabel(status) {
+  return { law: 'Became Law', 'passed-both': 'Passed Both', 'passed-house': 'Passed House',
+    'passed-senate': 'Passed Senate', failed: 'Failed', vetoed: 'Vetoed', committee: 'In Committee' }[status] || 'In Committee';
+}
+
+function billStatusClass(status) {
+  return { law: 'status-law', 'passed-both': 'status-passed', 'passed-house': 'status-passed',
+    'passed-senate': 'status-passed', failed: 'status-failed', vetoed: 'status-failed', committee: 'status-committee' }[status] || 'status-committee';
+}
+
+function congressGovUrl(bill) {
+  if (!bill?.congress || !bill?.type || !bill?.number) return null;
+  const typeSlug = { HR: 'house-bill', S: 'senate-bill', HJRES: 'house-joint-resolution',
+    SJRES: 'senate-joint-resolution', HCONRES: 'house-concurrent-resolution',
+    SCONRES: 'senate-concurrent-resolution', HRES: 'house-resolution', SRES: 'senate-resolution' };
+  const slug = typeSlug[bill.type] || bill.type.toLowerCase();
+  return `https://www.congress.gov/bill/${bill.congress}th-congress/${slug}/${bill.number}`;
 }
 
 function formatDate(dateStr) {
@@ -170,6 +201,7 @@ function renderDashboard() {
   renderRepTabs();
   renderRepHero(state.activeRepIdx);
   renderStatRow(state.activeRepIdx);
+  renderCommittees(state.activeRepIdx);
   renderActivityFeed(state.activeRepIdx);
 }
 
@@ -245,13 +277,33 @@ function renderStatRow(idx) {
     ? `${rep.state}-${rep.district}`
     : rep.state;
 
-  const billCount = cached?.sponsoredLegislation?.length ?? '—';
+  const bills = cached?.sponsoredLegislation || [];
+  const lawCount = bills.filter(b => billStatus(b.latestAction?.text) === 'law').length;
+  const billStat = cached ? (lawCount > 0 ? lawCount : bills.length) : '—';
+  const billLabel = cached ? (lawCount > 0 ? 'Laws' : 'Bills') : 'Bills';
 
   document.getElementById('statRow').innerHTML = `
     <div class="stat"><div class="stat-val">${esc(String(termsCount))}</div><div class="stat-label">Terms</div></div>
     <div class="stat"><div class="stat-val">${esc(String(sinceYear))}</div><div class="stat-label">Since</div></div>
     <div class="stat"><div class="stat-val">${esc(districtLabel)}</div><div class="stat-label">District</div></div>
-    <div class="stat"><div class="stat-val">${esc(String(billCount))}</div><div class="stat-label">Bills</div></div>`;
+    <div class="stat"><div class="stat-val">${esc(String(billStat))}</div><div class="stat-label">${esc(billLabel)}</div></div>`;
+}
+
+function renderCommittees(idx) {
+  const el = document.getElementById('committeeSection');
+  if (!el) return;
+  const rep = state.reps[idx];
+  const cached = rep?.bioguideId ? state.memberCache[rep.bioguideId] : null;
+  const committees = cached?.committees || [];
+  if (!committees.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-hint);margin-bottom:8px;">Committees</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">
+      ${committees.map(c => {
+        const rankLabel = c.rank ? ` · <span style="color:var(--blue)">${esc(c.rank)}</span>` : '';
+        return `<span class="committee-chip">${esc(c.name)}${rankLabel}</span>`;
+      }).join('')}
+    </div>`;
 }
 
 function renderActivityFeed(idx) {
@@ -279,19 +331,20 @@ function renderActivityFeed(idx) {
     const action = bill.latestAction?.text || '';
     const topic = bill.policyArea?.name || '';
     const billText = `${label} — ${bill.title}`;
+    const status = billStatus(action);
+    const url = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
 
     return `<div class="feed-card">
       <div class="feed-top">
-        <span class="feed-badge badge-vote">Bill</span>
+        <span class="feed-badge ${billStatusClass(status)}">${esc(billStatusLabel(status))}</span>
         ${topic ? `<span class="feed-badge badge-money" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
         <span class="feed-date">${esc(date)}</span>
       </div>
       <div class="feed-title">${esc(billText)}</div>
       ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
       <div class="feed-action">
-        <button class="explain-btn"
-          data-text="${esc(billText)}"
-          data-type="bill">What does this mean?</button>
+        <button class="explain-btn" data-text="${esc(billText)}" data-type="bill">What does this mean?</button>
+        ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -314,6 +367,7 @@ async function loadMemberDetail(bioguideId) {
     if (activeRep?.bioguideId === bioguideId) {
       renderRepHero(state.activeRepIdx);
       renderStatRow(state.activeRepIdx);
+      renderCommittees(state.activeRepIdx);
       renderActivityFeed(state.activeRepIdx);
     }
   } catch (e) {
@@ -395,37 +449,68 @@ function renderVotesScreen() {
   const rep = state.reps[state.activeRepIdx];
   const cached = rep?.bioguideId ? state.memberCache[rep.bioguideId] : null;
   const el = document.getElementById('votesContent');
-
   if (!rep) return;
-  if (!cached) {
-    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading voting record…</div>';
+
+  // If we have real roll-call vote data from Congress.gov, show it
+  const realVotes = rep.bioguideId ? state.votesCache[rep.bioguideId] : null;
+  if (realVotes?.length) {
+    _renderRealVotes(el, realVotes);
     return;
   }
 
-  // Congress.gov member/votes endpoint is not yet documented — showing sponsored bills as proxy
+  if (!cached) {
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading bill history…</div>';
+    // Kick off real-votes fetch in background
+    if (rep.bioguideId && !state.votesCache[rep.bioguideId]) _fetchVotes(rep.bioguideId);
+    return;
+  }
+
   const bills = cached.sponsoredLegislation || [];
   if (!bills.length) {
-    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No voting record available.</div>';
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No sponsored legislation found.</div>';
     return;
   }
 
-  el.innerHTML = `<div style="padding:0 16px;font-size:12px;color:var(--text-hint);margin-bottom:12px;">
-      ${bills.length} sponsored bills. Actual floor vote record requires ProPublica API — coming soon.
+  // Group bills by status for the summary header
+  const groups = { law: [], passed: [], failed: [], committee: [] };
+  bills.forEach(b => {
+    const s = billStatus(b.latestAction?.text);
+    if (s === 'law') groups.law.push(b);
+    else if (s.startsWith('passed')) groups.passed.push(b);
+    else if (s === 'failed' || s === 'vetoed') groups.failed.push(b);
+    else groups.committee.push(b);
+  });
+
+  const summaryChips = [
+    groups.law.length ? `<span class="status-law" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.law.length} became law</span>` : '',
+    groups.passed.length ? `<span class="status-passed" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.passed.length} passed a chamber</span>` : '',
+    groups.failed.length ? `<span class="status-failed" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.failed.length} failed</span>` : '',
+    groups.committee.length ? `<span class="status-committee" style="padding:4px 10px;border-radius:20px;font-size:12px;font-weight:500;">${groups.committee.length} in committee</span>` : '',
+  ].filter(Boolean).join('');
+
+  el.innerHTML = `
+    <div style="padding:0 16px 14px;">
+      <div style="font-size:13px;font-weight:500;margin-bottom:8px;">${bills.length} sponsored bills</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${summaryChips}</div>
     </div>` +
     bills.map(bill => {
       const label = `${billTypeLabel(bill.type)} ${bill.number} — ${bill.title}`;
       const date = formatDate(bill.introducedDate);
+      const action = bill.latestAction?.text || '';
+      const status = billStatus(action);
+      const url = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
+      const topic = bill.policyArea?.name || '';
       return `<div class="feed-card" style="margin:0 16px 8px;">
         <div class="feed-top">
-          <span class="feed-badge badge-vote">Sponsored</span>
+          <span class="feed-badge ${billStatusClass(status)}">${esc(billStatusLabel(status))}</span>
+          ${topic ? `<span class="feed-badge" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
           <span class="feed-date">${esc(date)}</span>
         </div>
         <div class="feed-title">${esc(label)}</div>
-        ${bill.latestAction?.text ? `<div class="feed-desc">${esc(bill.latestAction.text)}</div>` : ''}
+        ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
         <div class="feed-action">
-          <button class="explain-btn"
-            data-text="${esc(label)}"
-            data-type="bill">What does this mean?</button>
+          <button class="explain-btn" data-text="${esc(label)}" data-type="bill">What does this mean?</button>
+          ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -433,6 +518,38 @@ function renderVotesScreen() {
   el.querySelectorAll('.explain-btn').forEach(btn => {
     btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'bill', btn.dataset.text));
   });
+}
+
+function _renderRealVotes(el, votes) {
+  el.innerHTML = `<div style="padding:0 16px 10px;font-size:12px;color:var(--text-hint);">${votes.length} recorded floor votes</div>` +
+    votes.map(v => {
+      const pos = (v.position || '').toLowerCase();
+      const posClass = pos === 'yea' || pos === 'yes' ? 'vote-yes' : pos === 'nay' || pos === 'no' ? 'vote-no' : '';
+      const billLabel = v.bill ? `${billTypeLabel(v.bill.type)} ${v.bill.number}` : '';
+      const title = v.description || v.question || billLabel || 'Roll Call Vote';
+      return `<div class="feed-card" style="margin:0 16px 8px;">
+        <div class="feed-top">
+          ${posClass ? `<span class="${posClass}">${esc((v.position || '').toUpperCase())}</span>` : ''}
+          <span class="feed-badge status-committee">${esc(v.chamber || 'Floor vote')}</span>
+          <span class="feed-date">${esc(formatDate(v.date))}</span>
+        </div>
+        <div class="feed-title">${esc(title)}</div>
+        ${v.result ? `<div class="feed-desc">Result: ${esc(v.result)}</div>` : ''}
+      </div>`;
+    }).join('');
+}
+
+async function _fetchVotes(bioguideId) {
+  if (state.votesCache[bioguideId] !== undefined) return;
+  state.votesCache[bioguideId] = null; // mark in-flight
+  try {
+    const data = await apiFetch(`votes?bioguideId=${bioguideId}`);
+    state.votesCache[bioguideId] = data.votes || [];
+    const activeRep = state.reps[state.activeRepIdx];
+    if (activeRep?.bioguideId === bioguideId) renderVotesScreen();
+  } catch {
+    state.votesCache[bioguideId] = [];
+  }
 }
 
 // ── MONEY SCREEN ──────────────────────────────────────────────────────────────
@@ -496,11 +613,30 @@ function _renderMoneyData(el, data, rep) {
     employersHtml = `<div style="font-size:12px;color:var(--text-hint);margin-bottom:12px;">Employer breakdown not available for this cycle.</div>`;
   }
 
+  let donorsHtml = '';
+  const topDonors = data.topDonors || [];
+  if (topDonors.length) {
+    donorsHtml = `
+      <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-hint);margin:16px 0 10px;">Large individual donors</div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${topDonors.map(d => `
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+            <div style="min-width:0;">
+              <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(d.name)}</div>
+              ${d.employer || d.occupation ? `<div style="font-size:11px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc([d.occupation, d.employer].filter(Boolean).join(' · '))}</div>` : ''}
+              ${d.city || d.state ? `<div style="font-size:10px;color:var(--text-hint);">${esc([d.city, d.state].filter(Boolean).join(', '))}</div>` : ''}
+            </div>
+            <div style="font-size:13px;font-weight:600;color:var(--blue);flex-shrink:0;">${esc(fmtMoney(d.amount))}</div>
+          </div>`).join('<div style="height:1px;background:var(--border);margin:2px 0;"></div>')}
+      </div>`;
+  }
+
   el.innerHTML = `
     <div class="money-card" style="margin:0 16px;">
       <div style="font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--text-hint);margin-bottom:10px;">${esc(String(totals.cycle))} Election Cycle</div>
       ${statsHtml}
       ${employersHtml}
+      ${donorsHtml}
       <div style="font-size:10px;color:var(--text-hint);margin-top:12px;">Source: FEC · Federal Election Commission</div>
     </div>`;
 }
