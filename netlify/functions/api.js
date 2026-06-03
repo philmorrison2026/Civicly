@@ -417,7 +417,7 @@ async function handleExplain(rawBody) {
   if (!text) return fail(400, 'text is required.');
 
   const prompts = {
-    bill: `You are a nonpartisan civic education tool. Explain the following in plain English in 3-4 sentences that a non-political person would understand. Focus on what it actually does and who it affects. Do not editorialize or express any political opinion.\n\nTopic: ${text}`,
+    bill: `You are a nonpartisan civic education tool. Explain the following bill in plain English in 3-4 sentences that a non-political person would understand. Focus on what it actually does, who it affects, and what problem it's trying to solve. Use all the context provided below — do not say you lack information. If the exact bill details aren't in your training data, reason from the bill number, title, policy area, and congressional actions to give the most useful explanation possible.\n\nBill context:\n${text}`,
     vote: `You are a nonpartisan civic education tool. Explain this congressional vote in plain English in 2-3 sentences. Describe what the bill would do and what voting yes or no means in practice. Do not editorialize.\n\nVote: ${text}`,
     conflict: `You are a nonpartisan civic education tool. Summarize the following sequence of public events in neutral, factual language in 2-3 sentences. Do not draw conclusions — just describe what the public record shows.\n\nEvents: ${text}`,
     term: `Explain this political term in one simple sentence that a first-time voter would understand: ${text}`,

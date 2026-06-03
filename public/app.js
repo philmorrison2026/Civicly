@@ -55,6 +55,17 @@ function billStatusClass(status) {
     'passed-senate': 'status-passed', failed: 'status-failed', vetoed: 'status-failed', committee: 'status-committee' }[status] || 'status-committee';
 }
 
+function billExplainContext(bill) {
+  const label = `${billTypeLabel(bill.type)} ${bill.number}`;
+  const parts = [
+    `${label}: ${bill.title}`,
+    bill.policyArea?.name ? `Policy area: ${bill.policyArea.name}` : '',
+    bill.introducedDate ? `Introduced: ${bill.introducedDate}` : '',
+    bill.latestAction?.text ? `Latest action: ${bill.latestAction.text}` : '',
+  ];
+  return parts.filter(Boolean).join('\n');
+}
+
 function congressGovUrl(bill) {
   if (!bill?.congress || !bill?.type || !bill?.number) return null;
   const typeSlug = { HR: 'house-bill', S: 'senate-bill', HJRES: 'house-joint-resolution',
@@ -478,6 +489,7 @@ function _renderActivityList(allBills) {
       ? `<span class="feed-badge" style="background:var(--purple-bg);color:var(--purple-text);">Co-sponsored</span>`
       : `<span class="feed-badge" style="background:var(--blue-light);color:var(--blue-dark);">Sponsored</span>`;
 
+    const context = billExplainContext(bill);
     return `<div class="feed-card" style="margin:0 16px 8px;">
       <div class="feed-top">
         ${roleBadge}
@@ -488,14 +500,17 @@ function _renderActivityList(allBills) {
       <div class="feed-title">${esc(label)} — ${esc(bill.title)}</div>
       ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
       <div class="feed-action">
-        <button class="explain-btn" data-text="${esc(`${label} — ${bill.title}`)}" data-type="bill">What does this mean?</button>
+        <button class="explain-btn"
+          data-title="${esc(`${label} — ${bill.title}`)}"
+          data-context="${esc(context)}"
+          data-type="bill">What does this mean?</button>
         ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
       </div>
     </div>`;
   }).join('');
 
   el.querySelectorAll('.explain-btn').forEach(btn => {
-    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'bill', btn.dataset.text));
+    btn.addEventListener('click', () => openExplainModal(btn.dataset.title, 'bill', btn.dataset.context));
   });
 }
 
@@ -543,13 +558,13 @@ const modalTitle = document.getElementById('modalTitle');
 const modalBody = document.getElementById('modalBody');
 const modalClose = document.getElementById('modalClose');
 
-function openExplainModal(title, type, text) {
+function openExplainModal(title, type, context) {
   modalTitle.textContent = title;
   modalBody.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
   modal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 
-  apiPost('explain', { text, type })
+  apiPost('explain', { text: context, type })
     .then(data => {
       modalBody.textContent = data.explanation;
     })
@@ -710,17 +725,20 @@ function _renderVotesList(bills) {
         ${topic ? `<span class="feed-badge" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
         <span class="feed-date">${esc(date)}</span>
       </div>
-      <div class="feed-title">${esc(label)}</div>
+      <div class="feed-title">${esc(label)} — ${esc(bill.title || '')}</div>
       ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
       <div class="feed-action">
-        <button class="explain-btn" data-text="${esc(label)}" data-type="bill">What does this mean?</button>
+        <button class="explain-btn"
+          data-title="${esc(`${label} — ${bill.title || ''}`)}"
+          data-context="${esc(billExplainContext(bill))}"
+          data-type="bill">What does this mean?</button>
         ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
       </div>
     </div>`;
   }).join('');
 
   el.querySelectorAll('.explain-btn').forEach(btn => {
-    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'bill', btn.dataset.text));
+    btn.addEventListener('click', () => openExplainModal(btn.dataset.title, 'bill', btn.dataset.context));
   });
 }
 
@@ -766,14 +784,17 @@ function _renderRealVotes(el, votes) {
         ${tally ? `<span style="font-size:11px;color:var(--text-hint);">Final: ${esc(tally)}</span>` : ''}
       </div>
       <div class="feed-action">
-        <button class="explain-btn" data-text="${esc(v.question || 'congressional vote')}" data-type="vote">What does this mean?</button>
+        <button class="explain-btn"
+          data-title="${esc(v.question || 'Roll Call Vote')}"
+          data-context="${esc([v.question, v.bill ? `Bill: ${v.bill}` : '', v.result ? `Result: ${v.result}` : '', v.yeas && v.nays ? `Vote tally: ${v.yeas} Yea, ${v.nays} Nay` : ''].filter(Boolean).join('\n'))}"
+          data-type="vote">What does this mean?</button>
       </div>
     </div>`;
   }).join('');
 
   el.innerHTML = summaryHtml + cardsHtml;
   el.querySelectorAll('.explain-btn').forEach(btn => {
-    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'vote', btn.dataset.text));
+    btn.addEventListener('click', () => openExplainModal(btn.dataset.title, 'vote', btn.dataset.context));
   });
 }
 
