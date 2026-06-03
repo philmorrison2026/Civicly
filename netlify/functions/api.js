@@ -314,6 +314,7 @@ async function handleExplain(rawBody) {
     vote: `You are a nonpartisan civic education tool. Explain this congressional vote in plain English in 2-3 sentences. Describe what the bill would do and what voting yes or no means in practice. Do not editorialize.\n\nVote: ${text}`,
     conflict: `You are a nonpartisan civic education tool. Summarize the following sequence of public events in neutral, factual language in 2-3 sentences. Do not draw conclusions — just describe what the public record shows.\n\nEvents: ${text}`,
     term: `Explain this political term in one simple sentence that a first-time voter would understand: ${text}`,
+    poke: `You are a civic engagement assistant for an app called Civicly. Write a short, respectful message from a constituent to their representative. The message must be polite, nonpartisan, and specific to the issue and reaction provided. Write in first person as the constituent. Do not mention Civicly. Under 100 words. End with a clear, respectful ask. Do not add a subject line.\n\n${text}\n\nWrite only the message body, starting with the representative's title and last name (e.g. "Senator Lee," or "Representative Maloy,") and ending with "A constituent from [their state or district]."`,
   };
 
   const prompt = prompts[type] || prompts.bill;

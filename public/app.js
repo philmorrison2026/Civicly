@@ -203,6 +203,7 @@ function renderDashboard() {
   renderStatRow(state.activeRepIdx);
   renderCommittees(state.activeRepIdx);
   renderActivityFeed(state.activeRepIdx);
+  _wirePokeBtn();
 }
 
 function renderRepTabs() {
@@ -257,6 +258,7 @@ function renderRepHero(idx) {
         ${party ? `<span class="pill ${partyPillClass(party)}">${esc(partyLabel(party))}</span>` : ''}
         ${sinceYear ? `<span class="pill pill-tag">Since ${sinceYear}</span>` : ''}
         ${website ? `<a href="${esc(website)}" target="_blank" rel="noopener" style="display:block;font-size:12px;color:var(--blue);margin-top:6px;">Official website ↗</a>` : ''}
+        <button class="poke-btn" id="pokeRepBtn" style="margin-top:10px;">Poke Your Rep 👋</button>
       </div>
     </div>`;
 }
@@ -369,6 +371,7 @@ async function loadMemberDetail(bioguideId) {
       renderStatRow(state.activeRepIdx);
       renderCommittees(state.activeRepIdx);
       renderActivityFeed(state.activeRepIdx);
+      _wirePokeBtn();
     }
   } catch (e) {
     console.warn('Member detail fetch failed for', bioguideId, e.message);
@@ -780,6 +783,183 @@ document.querySelectorAll('.nav-item[data-screen]').forEach(item => {
     if (screenRenderMap[item.dataset.screen]) screenRenderMap[item.dataset.screen]();
   });
 });
+
+// ── POKE YOUR REP ─────────────────────────────────────────────────────────────
+const POKE_REACTIONS = [
+  { key: 'support',   emoji: '👍', label: 'Support',   desc: 'I support their stance on this' },
+  { key: 'oppose',    emoji: '👎', label: 'Oppose',    desc: 'I disagree with their position' },
+  { key: 'explain',  emoji: '❓', label: 'Explain',   desc: 'I want them to explain this' },
+  { key: 'concerned', emoji: '⚠️', label: 'Concerned', desc: "I'm worried about this issue" },
+];
+
+const POKE_ISSUES = [
+  'Healthcare', 'Economy', 'Climate & Energy', 'Defense & Veterans',
+  'Immigration', 'Education', 'Housing', 'Taxes', 'Tech & Privacy', 'Other',
+];
+
+let _poke = { step: 1, reaction: null, issue: null, message: '', generating: false };
+
+function _wirePokeBtn() {
+  const btn = document.getElementById('pokeRepBtn');
+  if (btn) btn.addEventListener('click', openPokeModal);
+}
+
+function openPokeModal() {
+  const rep = state.reps[state.activeRepIdx];
+  if (!rep) return;
+  _poke = { step: 1, reaction: null, issue: null, message: '', generating: false };
+  document.getElementById('pokeModal').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  _renderPokeStep(rep);
+}
+
+function closePokeModal() {
+  document.getElementById('pokeModal').classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+document.getElementById('pokeModalClose').addEventListener('click', closePokeModal);
+document.getElementById('pokeModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('pokeModal')) closePokeModal();
+});
+
+function _renderPokeStep(rep) {
+  const el = document.getElementById('pokeStepContent');
+  const title = document.getElementById('pokeModalTitle');
+
+  if (_poke.step === 1) {
+    title.textContent = 'How do you feel?';
+    el.innerHTML = `
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">
+        You're sending a message to <strong>${esc(rep.name)}</strong> (${esc(rep.role)}, ${esc(rep.state)}).
+      </p>
+      <div class="poke-reaction-grid">
+        ${POKE_REACTIONS.map(r => `
+          <button class="poke-reaction-option" data-reaction="${esc(r.key)}">
+            <span class="poke-emoji">${r.emoji}</span>
+            <span class="poke-reaction-label">${esc(r.label)}</span>
+            <span class="poke-reaction-desc">${esc(r.desc)}</span>
+          </button>`).join('')}
+      </div>`;
+    el.querySelectorAll('.poke-reaction-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _poke.reaction = btn.dataset.reaction;
+        _poke.step = 2;
+        _renderPokeStep(rep);
+      });
+    });
+
+  } else if (_poke.step === 2) {
+    title.textContent = "What's this about?";
+    el.innerHTML = `
+      <p style="font-size:13px;color:var(--text-muted);margin:0 0 16px;">Pick the issue you want to raise.</p>
+      <div class="poke-issue-grid">
+        ${POKE_ISSUES.map(issue => `
+          <button class="poke-issue-chip${_poke.issue === issue ? ' selected' : ''}" data-issue="${esc(issue)}">
+            ${esc(issue)}
+          </button>`).join('')}
+      </div>
+      <button class="btn-full" id="pokeContinueBtn" style="margin-top:20px;" ${_poke.issue ? '' : 'disabled'}>
+        Generate message →
+      </button>
+      <button class="poke-back-btn" id="pokeBack1">← Back</button>`;
+
+    el.querySelectorAll('.poke-issue-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        _poke.issue = chip.dataset.issue;
+        el.querySelectorAll('.poke-issue-chip').forEach(c => c.classList.toggle('selected', c.dataset.issue === _poke.issue));
+        document.getElementById('pokeContinueBtn').disabled = false;
+      });
+    });
+    document.getElementById('pokeContinueBtn').addEventListener('click', () => {
+      _poke.step = 3;
+      _renderPokeStep(rep);
+      _generatePokeMessage(rep);
+    });
+    document.getElementById('pokeBack1').addEventListener('click', () => { _poke.step = 1; _renderPokeStep(rep); });
+
+  } else if (_poke.step === 3) {
+    const reactionObj = POKE_REACTIONS.find(r => r.key === _poke.reaction);
+    title.textContent = 'Your message';
+    el.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+        <span class="poke-emoji" style="font-size:20px;">${reactionObj?.emoji || '📢'}</span>
+        <span style="font-size:13px;color:var(--text-muted);">${esc(reactionObj?.label || '')} · ${esc(_poke.issue)}</span>
+      </div>
+      ${_poke.generating
+        ? `<div class="loading-dots" style="justify-content:flex-start;padding:20px 0;"><span></span><span></span><span></span></div>`
+        : `<textarea id="pokeMessageArea" class="poke-message-area" rows="7">${esc(_poke.message)}</textarea>
+           <button class="poke-back-btn" id="pokeRegen" style="margin-top:4px;">↺ Regenerate</button>`
+      }
+      <button class="btn-full" id="pokeSendBtn" style="margin-top:16px;" ${_poke.generating ? 'disabled' : ''}>
+        Review &amp; Send →
+      </button>
+      <button class="poke-back-btn" id="pokeBack2" style="margin-top:8px;">← Back</button>`;
+
+    if (!_poke.generating) {
+      document.getElementById('pokeMessageArea').addEventListener('input', e => { _poke.message = e.target.value; });
+      document.getElementById('pokeRegen')?.addEventListener('click', () => { _generatePokeMessage(rep); });
+      document.getElementById('pokeSendBtn').addEventListener('click', () => { _poke.step = 4; _renderPokeStep(rep); });
+    }
+    document.getElementById('pokeBack2')?.addEventListener('click', () => { _poke.step = 2; _renderPokeStep(rep); });
+
+  } else if (_poke.step === 4) {
+    title.textContent = 'Ready to send';
+    const contactUrl = rep.website || `https://www.congress.gov/member/${rep.bioguideId}`;
+    const mailtoSubject = encodeURIComponent(`Constituent message re: ${_poke.issue}`);
+    const mailtoBody = encodeURIComponent(_poke.message);
+
+    el.innerHTML = `
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        Review your message, then send it through their official contact form.
+      </p>
+      <div class="poke-message-preview">${esc(_poke.message)}</div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:20px;">
+        <a href="${esc(contactUrl)}" target="_blank" rel="noopener" class="btn-primary" style="display:block;text-align:center;text-decoration:none;line-height:48px;">
+          Open official contact form ↗
+        </a>
+        <button class="poke-copy-btn" id="pokeCopyBtn">Copy message to clipboard</button>
+      </div>
+      <p style="font-size:11px;color:var(--text-hint);margin-top:16px;text-align:center;">
+        Civicly never sends anything automatically. You decide what goes out.
+      </p>
+      <button class="poke-back-btn" id="pokeBack3">← Edit message</button>`;
+
+    document.getElementById('pokeCopyBtn').addEventListener('click', () => {
+      navigator.clipboard.writeText(_poke.message).then(() => {
+        const btn = document.getElementById('pokeCopyBtn');
+        btn.textContent = 'Copied! ✓';
+        btn.style.background = 'var(--green-bg)';
+        btn.style.color = 'var(--green-text)';
+        setTimeout(() => { btn.textContent = 'Copy message to clipboard'; btn.style.background = ''; btn.style.color = ''; }, 2000);
+      });
+    });
+    document.getElementById('pokeBack3').addEventListener('click', () => { _poke.step = 3; _renderPokeStep(rep); });
+
+    // Record locally
+    const key = `poke_${rep.bioguideId || rep.name}`;
+    localStorage.setItem(key, String((parseInt(localStorage.getItem(key) || '0') + 1)));
+  }
+}
+
+async function _generatePokeMessage(rep) {
+  _poke.generating = true;
+  _renderPokeStep(rep);
+  const reactionObj = POKE_REACTIONS.find(r => r.key === _poke.reaction);
+  const context = [
+    `Representative: ${rep.name} (${rep.role}, ${rep.state})`,
+    `Constituent reaction: ${reactionObj?.label || _poke.reaction}`,
+    `Issue: ${_poke.issue}`,
+  ].join('\n');
+  try {
+    const data = await apiPost('explain', { text: context, type: 'poke' });
+    _poke.message = data.explanation || '';
+  } catch {
+    _poke.message = `${rep.role === 'Representative' ? 'Representative' : 'Senator'} ${rep.name.split(' ').pop()},\n\nI'm reaching out as a constituent about ${_poke.issue}. I'd appreciate hearing your position on this issue and how you're working to address the concerns of people in ${rep.state}.\n\nA constituent from ${rep.state}`;
+  }
+  _poke.generating = false;
+  _renderPokeStep(rep);
+}
 
 // ── INIT ──────────────────────────────────────────────────────────────────────
 renderSayVsDoPreview();

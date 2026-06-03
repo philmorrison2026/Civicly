@@ -172,6 +172,29 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); min-
 .money-bar-fill { height: 100%; background: var(--blue); border-radius: 3px; }
 .money-bar-amt { font-size: 11px; color: var(--text-muted); width: 52px; text-align: right; flex-shrink: 0; }
 
+.poke-btn { display:block; width:100%; height:38px; margin-top:10px; border-radius:var(--radius); border:1.5px solid var(--blue); background:transparent; color:var(--blue); font-size:13px; font-weight:500; cursor:pointer; font-family:var(--font); transition:all .15s; }
+.poke-btn:hover { background:var(--blue-light); }
+
+.poke-reaction-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.poke-reaction-option { border:1.5px solid var(--border); border-radius:var(--radius-lg); padding:14px 12px; background:var(--bg-card); cursor:pointer; text-align:left; display:flex; flex-direction:column; gap:4px; transition:all .15s; font-family:var(--font); }
+.poke-reaction-option:hover { border-color:var(--blue); background:var(--blue-light); }
+.poke-emoji { font-size:26px; line-height:1; }
+.poke-reaction-label { font-size:14px; font-weight:600; color:var(--text); }
+.poke-reaction-desc { font-size:11px; color:var(--text-muted); line-height:1.4; }
+
+.poke-issue-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.poke-issue-chip { border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; background:var(--bg-card); cursor:pointer; font-size:13px; font-family:var(--font); color:var(--text); text-align:left; transition:all .15s; }
+.poke-issue-chip:hover { border-color:var(--blue); background:var(--blue-light); }
+.poke-issue-chip.selected { border:1.5px solid var(--blue); background:var(--blue-light); color:var(--blue-dark); font-weight:500; }
+
+.poke-message-area { width:100%; border:1px solid var(--border-md); border-radius:var(--radius); padding:12px; font-size:13px; font-family:var(--font); color:var(--text); background:var(--bg-card); resize:vertical; line-height:1.6; box-sizing:border-box; }
+.poke-message-area:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(24,95,165,.12); }
+.poke-message-preview { background:var(--bg-surface); border-radius:var(--radius); padding:14px; font-size:13px; line-height:1.7; color:var(--text); white-space:pre-wrap; }
+.poke-back-btn { background:none; border:none; font-size:12px; color:var(--text-muted); cursor:pointer; font-family:var(--font); display:block; margin-top:8px; padding:4px 0; }
+.poke-back-btn:hover { color:var(--text); }
+.poke-copy-btn { width:100%; height:44px; border-radius:var(--radius); border:1px solid var(--border-md); background:var(--bg-card); font-size:14px; font-weight:500; cursor:pointer; font-family:var(--font); color:var(--text); transition:all .15s; }
+.poke-copy-btn:hover { border-color:var(--blue); color:var(--blue); }
+
 .committee-chip { display:inline-block; font-size:11px; padding:3px 9px; border-radius:20px; background:var(--purple-bg); color:var(--purple-text); font-weight:500; line-height:1.5; }
 .filter-section-label { font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:.06em; color:var(--text-hint); margin-bottom:6px; }
 .topic-select { height:34px; border:0.5px solid var(--border-md); border-radius:var(--radius); padding:0 32px 0 12px; font-size:13px; font-family:var(--font); background:var(--bg-card); color:var(--text); cursor:pointer; appearance:none; -webkit-appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236b7280' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; max-width:100%; }
