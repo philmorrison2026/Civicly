@@ -503,10 +503,10 @@ function renderVotesScreen() {
         ${statusOpts.map(o => `<div class="filter-chip${_votesFilter.status === o.key ? ' on' : ''}" data-status="${esc(o.key)}">${esc(o.label)}</div>`).join('')}
       </div>
       <div class="filter-section-label" style="margin-top:10px;">Topic</div>
-      <div class="filter-row" id="voteTopicFilter">
-        <div class="filter-chip${_votesFilter.topic === 'all' ? ' on' : ''}" data-topic="all">All topics</div>
-        ${topics.map(t => `<div class="filter-chip${_votesFilter.topic === t ? ' on' : ''}" data-topic="${esc(t)}">${esc(t)}</div>`).join('')}
-      </div>
+      <select id="voteTopicFilter" class="topic-select">
+        <option value="all">All topics</option>
+        ${topics.map(t => `<option value="${esc(t)}"${_votesFilter.topic === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}
+      </select>
     </div>
     <div id="votesList"></div>`;
 
@@ -519,12 +519,8 @@ function renderVotesScreen() {
     _renderVotesList(bills);
   });
 
-  document.getElementById('voteTopicFilter').addEventListener('click', e => {
-    const chip = e.target.closest('[data-topic]');
-    if (!chip) return;
-    _votesFilter.topic = chip.dataset.topic;
-    document.querySelectorAll('#voteTopicFilter .filter-chip').forEach(c =>
-      c.classList.toggle('on', c.dataset.topic === _votesFilter.topic));
+  document.getElementById('voteTopicFilter').addEventListener('change', e => {
+    _votesFilter.topic = e.target.value;
     _renderVotesList(bills);
   });
 
