@@ -510,9 +510,13 @@ function renderVotesScreen() {
   const realVotes = rep.bioguideId ? state.votesCache[rep.bioguideId] : null;
   if (realVotes?.length) { _renderRealVotes(el, realVotes); return; }
 
+  // Always kick off vote fetch when this screen opens (if not already in-flight or cached)
+  if (rep.bioguideId && state.votesCache[rep.bioguideId] === undefined) {
+    _fetchVotes(rep.bioguideId);
+  }
+
   if (!cached) {
-    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading bill history…</div>';
-    if (rep.bioguideId && !state.votesCache[rep.bioguideId]) _fetchVotes(rep.bioguideId);
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading…</div>';
     return;
   }
 
@@ -621,29 +625,68 @@ function _renderVotesList(bills) {
 }
 
 function _renderRealVotes(el, votes) {
-  el.innerHTML = `<div style="padding:0 16px 10px;font-size:12px;color:var(--text-hint);">${votes.length} recorded floor votes</div>` +
-    votes.map(v => {
-      const pos = (v.position || '').toLowerCase();
-      const posClass = pos === 'yea' || pos === 'yes' ? 'vote-yes' : pos === 'nay' || pos === 'no' ? 'vote-no' : '';
-      const billLabel = v.bill ? `${billTypeLabel(v.bill.type)} ${v.bill.number}` : '';
-      const title = v.description || v.question || billLabel || 'Roll Call Vote';
-      return `<div class="feed-card" style="margin:0 16px 8px;">
-        <div class="feed-top">
-          ${posClass ? `<span class="${posClass}">${esc((v.position || '').toUpperCase())}</span>` : ''}
-          <span class="feed-badge status-committee">${esc(v.chamber || 'Floor vote')}</span>
-          <span class="feed-date">${esc(formatDate(v.date))}</span>
-        </div>
-        <div class="feed-title">${esc(title)}</div>
-        ${v.result ? `<div class="feed-desc">Result: ${esc(v.result)}</div>` : ''}
-      </div>`;
-    }).join('');
+  if (!votes.length) {
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No recent roll-call votes found in public records.</div>';
+    return;
+  }
+
+  // Compute quick stats
+  const yeas = votes.filter(v => /^yea|^yes/i.test(v.position || '')).length;
+  const nays = votes.filter(v => /^nay|^no/i.test(v.position || '')).length;
+  const absent = votes.filter(v => /not voting|absent|present/i.test(v.position || '')).length;
+
+  const summaryHtml = `
+    <div style="padding:0 16px 14px;">
+      <div style="font-size:13px;font-weight:500;margin-bottom:6px;">${votes.length} recent floor votes</div>
+      <div style="display:flex;gap:10px;font-size:12px;">
+        <span style="color:var(--green-text);font-weight:600;">✓ ${yeas} Yea</span>
+        <span style="color:var(--red-text);font-weight:600;">✗ ${nays} Nay</span>
+        ${absent ? `<span style="color:var(--text-hint);">${absent} Not voting</span>` : ''}
+        <span style="color:var(--text-hint);margin-left:auto;font-size:11px;">Source: House Clerk / Senate LIS</span>
+      </div>
+    </div>`;
+
+  const cardsHtml = votes.map(v => {
+    const pos = (v.position || '').toLowerCase();
+    const isYea = /^yea|^yes/.test(pos);
+    const isNay = /^nay|^no/.test(pos);
+    const posClass = isYea ? 'vote-yes' : isNay ? 'vote-no' : '';
+    const posLabel = isYea ? 'YEA' : isNay ? 'NAY' : (v.position || 'Not Voting').toUpperCase();
+    const tally = v.yeas && v.nays ? `${v.yeas}–${v.nays}` : '';
+
+    return `<div class="feed-card" style="margin:0 16px 8px;">
+      <div class="feed-top">
+        ${posClass ? `<span class="${posClass}" style="font-weight:700;">${esc(posLabel)}</span>` : `<span class="feed-badge status-committee">${esc(posLabel)}</span>`}
+        ${v.bill ? `<span class="feed-badge badge-vote">${esc(v.bill)}</span>` : ''}
+        <span class="feed-date">${esc(v.date || '')}</span>
+      </div>
+      <div class="feed-title">${esc(v.question || 'Roll Call Vote')}</div>
+      <div class="feed-desc" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+        <span>${v.result ? `Result: ${esc(v.result)}` : ''}</span>
+        ${tally ? `<span style="font-size:11px;color:var(--text-hint);">Final: ${esc(tally)}</span>` : ''}
+      </div>
+      <div class="feed-action">
+        <button class="explain-btn" data-text="${esc(v.question || 'congressional vote')}" data-type="vote">What does this mean?</button>
+      </div>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = summaryHtml + cardsHtml;
+  el.querySelectorAll('.explain-btn').forEach(btn => {
+    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'vote', btn.dataset.text));
+  });
 }
 
 async function _fetchVotes(bioguideId) {
   if (state.votesCache[bioguideId] !== undefined) return;
   state.votesCache[bioguideId] = null; // mark in-flight
+
+  const rep = state.reps.find(r => r.bioguideId === bioguideId);
+  const chamber = rep?.role === 'Representative' ? 'H' : 'S';
+  const lastName = encodeURIComponent((rep?.name || '').trim().split(' ').pop());
+
   try {
-    const data = await apiFetch(`votes?bioguideId=${bioguideId}`);
+    const data = await apiFetch(`votes?bioguideId=${bioguideId}&chamber=${chamber}&lastName=${lastName}`);
     state.votesCache[bioguideId] = data.votes || [];
     const activeRep = state.reps[state.activeRepIdx];
     if (activeRep?.bioguideId === bioguideId) renderVotesScreen();

@@ -269,30 +269,137 @@ async function handleMember(params) {
   });
 }
 
-// ── HANDLER: /api/votes?bioguideId={id} ──────────────────────────────────────
+// ── HANDLER: /api/votes — House Clerk XML + Senate LIS XML ───────────────────
+
+// Generic fetch returning text body or null (with race-based timeout)
+async function fetchText(url, ms = 5000) {
+  try {
+    const req = fetch(url).then(r => r.ok ? r.text() : null).catch(() => null);
+    const timer = new Promise(r => setTimeout(() => r(null), ms));
+    return await Promise.race([req, timer]);
+  } catch { return null; }
+}
+
+// Probe multiple roll-call numbers in parallel; return highest that exists
+async function probeMax(urls) {
+  const results = await Promise.all(
+    urls.map(({ n, url, marker }) =>
+      fetchText(url, 3000).then(t => (t?.includes(marker) ? n : 0))
+    )
+  );
+  return Math.max(0, ...results);
+}
+
+async function findHouseMax(year) {
+  return probeMax([500, 350, 200, 100, 50, 20].map(n => ({
+    n,
+    url: `https://clerk.house.gov/evs/${year}/roll${String(n).padStart(3, '0')}.xml`,
+    marker: '<rollcall-vote',
+  })));
+}
+
+async function findSenateMax(congress, session) {
+  return probeMax([500, 350, 200, 100, 50, 20].map(n => ({
+    n,
+    url: `https://www.senate.gov/legislative/LIS/roll_call_votes/vote${congress}${session}/vote_${congress}_${session}_${String(n).padStart(5, '0')}.xml`,
+    marker: '<roll_call_vote',
+  })));
+}
+
+function parseHouseVote(xml, bioguideId) {
+  const m = new RegExp(
+    `name-id="${bioguideId}"[^>]*>[^<]*<\\/legislator>\\s*<vote>([^<]+)<\\/vote>`, 'i'
+  ).exec(xml);
+  if (!m) return null;
+  const get = (re) => (re.exec(xml)?.[1] || '').trim();
+  return {
+    position:  m[1].trim(),
+    question:  get(/<vote-desc>([^<]+)<\/vote-desc>/i) || get(/<vote-question>([^<]+)<\/vote-question>/i),
+    date:      get(/<action-date[^>]*>([^<]+)<\/action-date>/i),
+    result:    get(/<vote-result>([^<]+)<\/vote-result>/i),
+    bill:      get(/<legis-num>([^<]+)<\/legis-num>/i),
+    yeas:      parseInt(get(/<yea-count>(\d+)<\/yea-count>/i) || '0'),
+    nays:      parseInt(get(/<nay-count>(\d+)<\/nay-count>/i) || '0'),
+  };
+}
+
+function parseSenateVote(xml, lastName) {
+  const safe = lastName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const m = new RegExp(
+    `<last_name>${safe}<\\/last_name>[\\s\\S]*?<vote_cast>([^<]+)<\\/vote_cast>`, 'i'
+  ).exec(xml);
+  if (!m) return null;
+  const get = (re) => (re.exec(xml)?.[1] || '').trim();
+  return {
+    position: m[1].trim(),
+    question: get(/<vote_document_text>([^<]+)<\/vote_document_text>/i) || get(/<vote_question_text>([^<]+)<\/vote_question_text>/i),
+    date:     get(/<vote_date>([^<]+)<\/vote_date>/i),
+    result:   get(/<vote_result>([^<]+)<\/vote_result>/i),
+    bill:     '',
+    yeas:     parseInt(get(/<yeas>(\d+)<\/yeas>/i) || '0'),
+    nays:     parseInt(get(/<nays>(\d+)<\/nays>/i) || '0'),
+  };
+}
+
+async function fetchHouseVotes(bioguideId) {
+  const votes = [];
+  for (const year of [2026, 2025]) {
+    if (votes.length >= 15) break;
+    const max = await findHouseMax(year);
+    if (!max) continue;
+    const nums = Array.from({ length: Math.min(20, max) }, (_, i) => max - i).filter(n => n > 0);
+    for (let i = 0; i < nums.length && votes.length < 15; i += 7) {
+      const batch = nums.slice(i, i + 7);
+      const texts = await Promise.all(batch.map(n =>
+        fetchText(`https://clerk.house.gov/evs/${year}/roll${String(n).padStart(3, '0')}.xml`, 4500)
+      ));
+      texts.forEach((t, j) => {
+        if (!t) return;
+        const p = parseHouseVote(t, bioguideId);
+        if (p) votes.push({ ...p, chamber: 'House', rollNum: batch[j], year });
+      });
+    }
+  }
+  return votes;
+}
+
+async function fetchSenateVotes(lastName) {
+  const votes = [];
+  for (const [congress, session] of [[119, 2], [119, 1]]) {
+    if (votes.length >= 15) break;
+    const max = await findSenateMax(congress, session);
+    if (!max) continue;
+    const base = `https://www.senate.gov/legislative/LIS/roll_call_votes/vote${congress}${session}`;
+    const nums = Array.from({ length: Math.min(20, max) }, (_, i) => max - i).filter(n => n > 0);
+    for (let i = 0; i < nums.length && votes.length < 15; i += 7) {
+      const batch = nums.slice(i, i + 7);
+      const texts = await Promise.all(batch.map(n =>
+        fetchText(`${base}/vote_${congress}_${session}_${String(n).padStart(5, '0')}.xml`, 4500)
+      ));
+      texts.forEach((t, j) => {
+        if (!t) return;
+        const p = parseSenateVote(t, lastName);
+        if (p) votes.push({ ...p, chamber: 'Senate', rollNum: batch[j], congress, session });
+      });
+    }
+  }
+  return votes;
+}
+
 async function handleVotes(params) {
   const bioguideId = (params.bioguideId || '').trim();
+  const chamber    = (params.chamber   || 'H').trim().toUpperCase();
+  const lastName   = (params.lastName  || '').trim();
   if (!bioguideId) return fail(400, 'bioguideId is required.');
-
-  // Try Congress.gov member votes endpoint (available in API v3 for some congresses)
-  const data = await cFetch(`/member/${bioguideId}/votes?limit=50`);
-  if (data?.votes?.length) {
-    return ok({
-      source: 'congress',
-      votes: data.votes.map(v => ({
-        date: v.date || v.actionDate || null,
-        question: v.question || null,
-        description: v.description || null,
-        bill: v.bill ? { type: v.bill.type, number: v.bill.number, title: v.bill.title } : null,
-        position: v.memberPosition || v.position || null,
-        result: v.result || null,
-        chamber: v.chamber || null,
-        rollNumber: v.rollNumber || null,
-      })),
-    });
+  try {
+    const votes = chamber === 'S'
+      ? await fetchSenateVotes(lastName)
+      : await fetchHouseVotes(bioguideId);
+    return ok({ source: 'xml', chamber, votes });
+  } catch (e) {
+    console.error('Vote fetch error:', e.message);
+    return ok({ source: 'xml', chamber, votes: [] });
   }
-
-  return ok({ source: 'none', votes: [] });
 }
 
 // ── HANDLER: POST /api/explain ────────────────────────────────────────────────
