@@ -230,7 +230,7 @@ async function handleMember(params) {
   const [memberData, sponsored, cosponsored, committeeData] = await Promise.all([
     cFetch(`/member/${bioguideId}`),
     cFetch(`/member/${bioguideId}/sponsored-legislation?limit=250`),
-    cFetch(`/member/${bioguideId}/cosponsored-legislation?limit=20`),
+    cFetch(`/member/${bioguideId}/cosponsored-legislation?limit=100`),
     cFetch(`/member/${bioguideId}/committee-assignments`),
   ]);
 

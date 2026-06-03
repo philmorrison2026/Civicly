@@ -333,6 +333,9 @@ function renderStatRow(idx) {
     <div class="stat"><div class="stat-val">${esc(String(billStat))}</div><div class="stat-label">${esc(billLabel)}</div></div>`;
 }
 
+// Activity feed filter state — reset on rep switch
+let _activityFilter = { bioguideId: null, status: 'all', topic: 'all', role: 'all' };
+
 function renderCommittees(idx) {
   const el = document.getElementById('committeeSection');
   if (!el) return;
@@ -356,6 +359,10 @@ function renderActivityFeed(idx) {
   const cached = rep.bioguideId ? state.memberCache[rep.bioguideId] : null;
   const feedEl = document.getElementById('activityFeed');
 
+  if (_activityFilter.bioguideId !== rep.bioguideId) {
+    _activityFilter = { bioguideId: rep.bioguideId, status: 'all', topic: 'all', role: 'all' };
+  }
+
   if (!cached) {
     feedEl.innerHTML = rep.bioguideId
       ? '<div style="padding:16px;font-size:13px;color:var(--text-muted);">Loading activity…</div>'
@@ -363,39 +370,132 @@ function renderActivityFeed(idx) {
     return;
   }
 
-  const bills = cached.sponsoredLegislation || [];
-  if (!bills.length) {
-    feedEl.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No sponsored legislation found.</div>';
+  // Combine sponsored + co-sponsored, sorted newest first
+  const allBills = [
+    ...(cached.sponsoredLegislation || []).map(b => ({ ...b, _role: 'sponsored' })),
+    ...(cached.cosponsoredLegislation || []).map(b => ({ ...b, _role: 'cosponsored' })),
+  ].sort((a, b) => new Date(b.introducedDate || 0) - new Date(a.introducedDate || 0));
+
+  if (!allBills.length) {
+    feedEl.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No legislative activity found.</div>';
     return;
   }
 
-  feedEl.innerHTML = bills.slice(0, 6).map(bill => {
-    const label = `${billTypeLabel(bill.type)} ${bill.number}`;
-    const date = formatDate(bill.introducedDate);
-    const action = bill.latestAction?.text || '';
-    const topic = bill.policyArea?.name || '';
-    const billText = `${label} — ${bill.title}`;
-    const status = billStatus(action);
-    const url = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
+  // Count by status for filter labels
+  const counts = { law: 0, passed: 0, failed: 0, committee: 0 };
+  allBills.forEach(b => {
+    const s = billStatus(b.latestAction?.text);
+    if (s === 'law') counts.law++;
+    else if (s.startsWith('passed')) counts.passed++;
+    else if (s === 'failed' || s === 'vetoed') counts.failed++;
+    else counts.committee++;
+  });
 
-    return `<div class="feed-card">
+  const topics = [...new Set(allBills.map(b => b.policyArea?.name).filter(Boolean))].sort();
+
+  const statusOpts = [
+    { key: 'all',       label: `All (${allBills.length})` },
+    counts.law      ? { key: 'law',       label: `Became Law (${counts.law})` }       : null,
+    counts.passed   ? { key: 'passed',    label: `Passed (${counts.passed})` }         : null,
+    counts.failed   ? { key: 'failed',    label: `Failed (${counts.failed})` }         : null,
+    counts.committee ? { key: 'committee', label: `In Committee (${counts.committee})` } : null,
+  ].filter(Boolean);
+
+  feedEl.innerHTML = `
+    <div style="padding:0 16px 12px;">
+      <div class="filter-row" id="activityStatusFilter" style="margin-bottom:8px;">
+        ${statusOpts.map(o => `<div class="filter-chip${_activityFilter.status === o.key ? ' on' : ''}" data-status="${esc(o.key)}">${esc(o.label)}</div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="activityTopicFilter" class="topic-select" style="flex:1;min-width:140px;">
+          <option value="all">All topics</option>
+          ${topics.map(t => `<option value="${esc(t)}"${_activityFilter.topic === t ? ' selected' : ''}>${esc(t)}</option>`).join('')}
+        </select>
+        <div class="filter-row" id="activityRoleFilter" style="margin:0;flex-shrink:0;">
+          <div class="filter-chip${_activityFilter.role === 'all'        ? ' on' : ''}" data-role="all"        style="font-size:11px;">All</div>
+          <div class="filter-chip${_activityFilter.role === 'sponsored'  ? ' on' : ''}" data-role="sponsored"  style="font-size:11px;">Sponsored</div>
+          <div class="filter-chip${_activityFilter.role === 'cosponsored'? ' on' : ''}" data-role="cosponsored" style="font-size:11px;">Co-sponsored</div>
+        </div>
+      </div>
+    </div>
+    <div id="activityList"></div>`;
+
+  document.getElementById('activityStatusFilter').addEventListener('click', e => {
+    const chip = e.target.closest('[data-status]');
+    if (!chip) return;
+    _activityFilter.status = chip.dataset.status;
+    document.querySelectorAll('#activityStatusFilter .filter-chip').forEach(c =>
+      c.classList.toggle('on', c.dataset.status === _activityFilter.status));
+    _renderActivityList(allBills);
+  });
+
+  document.getElementById('activityTopicFilter').addEventListener('change', e => {
+    _activityFilter.topic = e.target.value;
+    _renderActivityList(allBills);
+  });
+
+  document.getElementById('activityRoleFilter').addEventListener('click', e => {
+    const chip = e.target.closest('[data-role]');
+    if (!chip) return;
+    _activityFilter.role = chip.dataset.role;
+    document.querySelectorAll('#activityRoleFilter .filter-chip').forEach(c =>
+      c.classList.toggle('on', c.dataset.role === _activityFilter.role));
+    _renderActivityList(allBills);
+  });
+
+  _renderActivityList(allBills);
+}
+
+function _renderActivityList(allBills) {
+  const el = document.getElementById('activityList');
+  if (!el) return;
+
+  const filtered = allBills.filter(b => {
+    const s = billStatus(b.latestAction?.text);
+    const statusMatch = _activityFilter.status === 'all'
+      || (_activityFilter.status === 'passed' && s.startsWith('passed'))
+      || (_activityFilter.status === 'committee' && s === 'committee')
+      || s === _activityFilter.status;
+    const topicMatch = _activityFilter.topic === 'all' || b.policyArea?.name === _activityFilter.topic;
+    const roleMatch  = _activityFilter.role === 'all'  || b._role === _activityFilter.role;
+    return statusMatch && topicMatch && roleMatch;
+  });
+
+  if (!filtered.length) {
+    el.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--text-muted);">No bills match this filter.</div>';
+    return;
+  }
+
+  el.innerHTML = filtered.map(bill => {
+    const label   = `${billTypeLabel(bill.type)} ${bill.number}`;
+    const date    = formatDate(bill.introducedDate);
+    const action  = bill.latestAction?.text || '';
+    const status  = billStatus(action);
+    const url     = congressGovUrl({ congress: bill.congress, type: bill.type, number: bill.number });
+    const topic   = bill.policyArea?.name || '';
+    const isCosp  = bill._role === 'cosponsored';
+    const roleBadge = isCosp
+      ? `<span class="feed-badge" style="background:var(--purple-bg);color:var(--purple-text);">Co-sponsored</span>`
+      : `<span class="feed-badge" style="background:var(--blue-light);color:var(--blue-dark);">Sponsored</span>`;
+
+    return `<div class="feed-card" style="margin:0 16px 8px;">
       <div class="feed-top">
+        ${roleBadge}
         <span class="feed-badge ${billStatusClass(status)}">${esc(billStatusLabel(status))}</span>
-        ${topic ? `<span class="feed-badge badge-money" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
+        ${topic ? `<span class="feed-badge" style="background:var(--teal-bg);color:var(--teal-text);">${esc(topic)}</span>` : ''}
         <span class="feed-date">${esc(date)}</span>
       </div>
-      <div class="feed-title">${esc(billText)}</div>
+      <div class="feed-title">${esc(label)} — ${esc(bill.title)}</div>
       ${action ? `<div class="feed-desc">${esc(action)}</div>` : ''}
       <div class="feed-action">
-        <button class="explain-btn" data-text="${esc(billText)}" data-type="bill">What does this mean?</button>
+        <button class="explain-btn" data-text="${esc(`${label} — ${bill.title}`)}" data-type="bill">What does this mean?</button>
         ${url ? `<a href="${esc(url)}" target="_blank" rel="noopener" class="source-note" style="color:var(--blue);">congress.gov ↗</a>` : ''}
       </div>
     </div>`;
   }).join('');
 
-  // Wire up explain buttons
-  feedEl.querySelectorAll('.explain-btn').forEach(btn => {
-    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, btn.dataset.type, btn.dataset.text));
+  el.querySelectorAll('.explain-btn').forEach(btn => {
+    btn.addEventListener('click', () => openExplainModal(btn.dataset.text, 'bill', btn.dataset.text));
   });
 }
 
